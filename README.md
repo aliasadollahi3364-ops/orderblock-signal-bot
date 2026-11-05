@@ -36,16 +36,20 @@ The agreed demo position management is:
 - Closed-candle Python engine for confirmed 4H BOS / Order Block creation and invalidation.
 - 15m pivot, ATR, OB touch/freshness, CHoCH, retest, confirmation-candle, optional SMA200 and optional 4H trend-filter logic.
 - Public-only CCXT market-data adapter for active linear USDT perpetual markets.
-- Internal demo ledger with $100 starting balance, $5 margin, 5x leverage, 1R/2R/3R partial targets, and stop movement after TP1/TP2.
-- Initial unit tests for OB creation/invalidation and demo position accounting.
+- Internal demo ledger supporting multiple independent positions, $100 starting balance, $5 margin per trade, 5x leverage, 1R/2R/3R partial targets, and stop movement after TP1/TP2.
+- Read-only FastAPI endpoints for status, account, positions, and event history.
+- Initial Telegram commands: /start, /status, /demo, /open, /stats, /help.
+- GitHub Actions workflow to run the Python unit tests.
 - Validated environment settings with a hard guard against enabling live trading.
 
-The Telegram bot, persistent database, full market scanner orchestration, web dashboard, and HOKAS deployment are still pending. The current market-data adapter has not yet been verified against live WEEX responses, and the strategy tests have not yet been run in a deployment environment.
+The persistent database, automatic 500-market/60-candidate scanner orchestration, signal-to-demo auto-entry loop, rich web dashboard, Telegram signal notifications, and HOKAS deployment are still pending. The current market-data adapter has not yet been verified against live WEEX responses, and CI results must be checked before relying on the implementation.
 
-## Configuration
+## Run locally
 
-Copy `.env.example` to `.env` and fill in the required credentials. Never commit secrets.
+Install dependencies with `pip install -r requirements.txt`, copy `.env.example` to `.env`, and start with `python main.py`. Set `TELEGRAM_BOT_TOKEN` to enable Telegram polling; the HTTP API can start without it. Never commit secrets.
+
+The current dashboard API is read-only and reports scanner state as NOT_STARTED until the scanner orchestration is implemented.
 
 ## Status
 
-The first strategy and demo-account implementation has been committed. It still requires test execution, comparison against TradingView candle-by-candle, WEEX market-data verification, Telegram/web integration, and deployment. No live trading functionality is implemented.
+The strategy engine, demo accounting, read-only API, and basic Telegram commands have been committed. They still require test execution, candle-by-candle comparison against TradingView, WEEX market-data verification, scanner orchestration, and deployment. No live trading functionality is implemented.
