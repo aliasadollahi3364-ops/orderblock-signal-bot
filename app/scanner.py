@@ -39,7 +39,7 @@ def _to_candles(rows: list[list[float]]) -> list[Candle]:
             timestamp=int(row[0]), open=float(row[1]), high=float(row[2]),
             low=float(row[3]), close=float(row[4]), volume=float(row[5]),
         ))
-    return result
+    return sorted({bar.timestamp: bar for bar in result}.values(), key=lambda bar: bar.timestamp)
 
 
 def _ordered_feed(engine: OrderBlockStrategy, bars4: list[Candle],
@@ -121,7 +121,9 @@ class AutomaticScanner:
                 for bar in bars4:
                     if bar.timestamp + MS_4H <= now_ms:
                         htf_engine.on_4h_close(bar)
-                last_price = float(self.market_data.fetch_ohlcv(market.symbol, "15m", 2)[-1][4])
+                last_price = market.last_price
+                if last_price is None or last_price <= 0:
+                    continue
                 distance = _active_ob_distance(htf_engine, last_price)
                 if distance is None:
                     continue
