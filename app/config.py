@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     timeframe_entry: str = "15m"
     timeframe_order_block: str = "4h"
     scan_interval_seconds: int = Field(default=60, ge=10)
+    scanner_universe_limit: int = Field(default=500, ge=1, le=2000)
+    scanner_candidate_limit: int = Field(default=60, ge=1, le=500)
     demo_initial_balance: float = Field(default=100.0, gt=0)
     demo_margin_per_trade: float = Field(default=5.0, gt=0)
     demo_leverage: float = Field(default=5.0, gt=0)
