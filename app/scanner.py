@@ -151,6 +151,9 @@ class AutomaticScanner:
                 signal = _ordered_feed(engine, bars4, bars15)
                 if signal is not None and self._last_signal_bar.get(signal.symbol) != signal.timestamp:
                     self._last_signal_bar[signal.symbol] = signal.timestamp
+                    # The entry candle must not also be replayed as post-entry
+                    # price action in the demo position manager.
+                    self._last_demo_bar[signal.symbol] = signal.timestamp
                     signals.append(signal)
                     if self.on_signal:
                         self.on_signal(signal)
