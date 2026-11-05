@@ -1,4 +1,4 @@
-"""Shared in-memory runtime state for API and Telegram read-only views."""
+"""Shared runtime state for API, Telegram, scanner and persistence."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -17,6 +17,11 @@ class BotRuntime:
     selected_symbols: list[str] = field(default_factory=list)
     signal_count: int = 0
     closed_trade_events: list[dict[str, Any]] = field(default_factory=list)
+    storage: Any = None
+
+    def persist_demo_state(self) -> None:
+        if self.storage is not None:
+            self.storage.save_state(self.account, self.closed_trade_events)
 
 
 runtime = BotRuntime()
