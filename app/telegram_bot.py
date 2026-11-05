@@ -120,6 +120,89 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+async def pairs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    manual = sorted(runtime.manual_symbols)
+    automatic = [symbol for symbol in runtime.selected_symbols if symbol not in set(manual)]
+    lines = [
+        "📋 فهرست ارزهای ربات",
+        f"ارزهای واجد شرایط فعلی اسکن: {len(runtime.selected_symbols)}",
+        f"انتخاب خودکار: {len(automatic)}",
+        f"افزوده‌شده دستی: {len(manual)}",
+        "",
+        "ارزهای در حال اسکن:",
+    ]
+    lines.extend(runtime.selected_symbols or ["فعلاً هیچ ارزی واجد شرایط OB نیست."])
+    lines.extend(["", "فهرست دستی:"])
+    lines.extend(manual or ["موردی اضافه نشده است."])
+    text = "\\n".join(lines)
+    for start in range(0, len(text), 3800):
+        await update.effective_message.reply_text(text[start:start + 3800])
+
+
+async def add_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    if not context.args:
+        await update.effective_message.reply_text("نماد را وارد کن. مثال: /add BTC یا /add BTC/USDT")
+        return
+    try:
+        candidate = await __import__("asyncio").to_thread(
+            _resolve_symbol, " ".join(context.args)
+        )
+        symbol = candidate.symbol
+        if symbol in runtime.manual_symbols:
+            await update.effective_message.reply_text(f"{symbol} از قبل در فهرست دستی است.")
+            return
+        runtime.manual_symbols.append(symbol)
+        if runtime.storage is not None:
+            runtime.storage.save_manual_symbols(runtime.manual_symbols)
+        await update.effective_message.reply_text(
+            f"✅ {symbol} به فهرست دستی اضافه شد. در اسکن بعدی بررسی می‌شود؛ "
+            "فقط در صورت داشتن اردربلاک معتبر وارد اسکن ۱۵ دقیقه‌ای خواهد شد."
+        )
+    except Exception as exc:
+        await update.effective_message.reply_text(f"❌ افزودن ارز انجام نشد: {exc}")
+
+
+async def remove_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    if not context.args:
+        await update.effective_message.reply_text("مثال: /remove BTC یا /remove BTC/USDT")
+        return
+    requested = " ".join(context.args).strip().upper()
+    if not requested.endswith("/USDT"):
+        requested += "/USDT"
+    if requested not in runtime.manual_symbols:
+        await update.effective_message.reply_text(
+            "این ارز در فهرست دستی نیست. حذف فقط برای ارزهایی انجام می‌شود که خودت اضافه کرده‌ای."
+        )
+        return
+    runtime.manual_symbols.remove(requested)
+    if runtime.storage is not None:
+        runtime.storage.save_manual_symbols(runtime.manual_symbols)
+    await update.effective_message.reply_text(f"🗑 {requested} از فهرست دستی حذف شد.")
+
+
+def _resolve_symbol(requested: str):
+    # Market-data instance is attached by the scanner bootstrap.
+    resolver = runtime.market_symbol_resolver
+    if resolver is None:
+        raise RuntimeError("اتصال بازار هنوز آماده نیست؛ چند لحظه دیگر تلاش کن.")
+    return resolver(requested)
+
+
+async def auto_pairs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await _authorized(update, context):
+        await update.effective_message.reply_text(
+            f"انتخاب خودکار: فعال\\nنمادهای واجد شرایط فعلی: {len(runtime.selected_symbols)}\\n"
+            f"افزوده‌شده دستی: {len(runtime.manual_symbols)}\\n"
+            "اسکنر فقط ارزهای دارای اردربلاک معتبر را نگه می‌دارد."
+        )
+
+
 async def strategy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await _authorized(update, context):
         await update.effective_message.reply_text(_strategy_text())
@@ -141,7 +224,7 @@ def build_telegram_application(token: str, allowed_chat_id: str) -> Application:
     application.bot_data["allowed_chat_id"] = allowed_chat_id
     for command, callback in (
         ("start", start), ("status", status), ("demo", demo),
-        ("open", open_positions), ("stats", stats), ("strategy", strategy),
+        ("open", open_positions), ("pairs", pairs), ("add", add_pair), ("remove", remove_pair), ("auto_pairs", auto_pairs), ("stats", stats), ("strategy", strategy),
         ("help", help_command),
     ):
         application.add_handler(CommandHandler(command, callback))
