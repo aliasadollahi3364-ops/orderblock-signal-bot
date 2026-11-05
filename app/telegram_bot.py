@@ -316,7 +316,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     await update.effective_message.reply_text(
         "/start - شروع\n/status - وضعیت ربات\n/demo - موجودی دمو\n"
-        "/open - معاملات باز\n/pairs - فهرست ارزها\n/add BTC - افزودن ارز دستی\n/remove BTC - حذف ارز دستی\n/auto_pairs - وضعیت انتخاب خودکار\n/stats - آمار حساب\n/strategy - تنظیمات استراتژی\n/help - راهنما"
+        "/open - معاملات باز\n/pairs - فهرست ارزها\n/add BTC - افزودن ارز دستی\n/remove BTC - حذف ارز دستی\n/auto_pairs - وضعیت انتخاب خودکار\n/stats - آمار حساب\n/strategy - نمایش تنظیمات\n/set pivot4 4 - تغییر عدد\n/enable sma200 - روشن کردن فیلتر\n/disable sma200 - خاموش کردن فیلتر\n/reset_strategy - بازنشانی\n/help - راهنما"
     )
 
 
