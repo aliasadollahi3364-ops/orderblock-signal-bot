@@ -135,11 +135,27 @@ class DemoAccount:
             pos.tp1_done = True
             pos.stop = pos.entry
             events.append({"type": "TP1", "price": pos.tp1})
+            # If the same OHLC candle also crosses the newly moved stop,
+            # assume the stop happened first after TP1 (conservative fill).
+            moved_stop_hit = low <= pos.stop if long_side else high >= pos.stop
+            if moved_stop_hit:
+                self._close_fraction(pos, 1.0, pos.stop)
+                pos.closed = True
+                events.append({"type": "BREAK_EVEN_STOP", "price": pos.stop})
+                return events
+
         if not pos.tp2_done and target_hit(pos.tp2):
             self._close_fraction(pos, 0.33, pos.tp2)
             pos.tp2_done = True
             pos.stop = pos.tp1
             events.append({"type": "TP2", "price": pos.tp2})
+            moved_stop_hit = low <= pos.stop if long_side else high >= pos.stop
+            if moved_stop_hit:
+                self._close_fraction(pos, 1.0, pos.stop)
+                pos.closed = True
+                events.append({"type": "TP1_TRAILING_STOP", "price": pos.stop})
+                return events
+
         if not pos.tp3_done and target_hit(pos.tp3):
             self._close_fraction(pos, 1.0, pos.tp3)
             pos.tp3_done = True
