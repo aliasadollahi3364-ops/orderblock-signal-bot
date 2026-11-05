@@ -9,3 +9,10 @@ venv/
 !.env.example
 *.log
 .DS_Store
+
+# Local demo ledger and SQLite sidecar files
+data/
+*.sqlite
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
