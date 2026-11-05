@@ -20,24 +20,15 @@ async def _authorized(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
 def _account_text() -> str:
     acct = runtime.account
     return (
-        "حساب دمو
-"
-        f"موجودی اولیه: {acct.initial_balance:.2f} USDT
-"
-        f"موجودی: {float(acct.balance or 0):.2f} USDT
-"
-        f"مارجین هر معامله: {acct.margin_per_trade:.2f} USDT
-"
-        f"اهرم: {acct.leverage:g}x
-"
-        f"ارزش اسمی هر معامله: {acct.notional:.2f} USDT
-"
-        f"مارجین مصرف‌شده: {acct.margin_used:.2f} USDT
-"
-        f"مارجین آزاد: {acct.free_margin:.2f} USDT
-"
-        f"معاملات باز: {len(acct.open_positions)}
-"
+        "حساب دمو\n"
+        f"موجودی اولیه: {acct.initial_balance:.2f} USDT\n"
+        f"موجودی: {float(acct.balance or 0):.2f} USDT\n"
+        f"مارجین هر معامله: {acct.margin_per_trade:.2f} USDT\n"
+        f"اهرم: {acct.leverage:g}x\n"
+        f"ارزش اسمی هر معامله: {acct.notional:.2f} USDT\n"
+        f"مارجین مصرف‌شده: {acct.margin_used:.2f} USDT\n"
+        f"مارجین آزاد: {acct.free_margin:.2f} USDT\n"
+        f"معاملات باز: {len(acct.open_positions)}\n"
         "معاملات واقعی: غیرفعال"
     )
 
