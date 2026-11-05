@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 
 import uvicorn
 from telegram import Bot
 
 from app.api import app
+from app.charting import make_signal_chart
 from app.config import Settings
 from app.demo import DemoAccount
 from app.market_data import WeexMarketData
@@ -56,22 +58,44 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
                 if result.exception() else None
             )
 
+    async def send_signal_photo(signal: Signal, position) -> None:
+        if bot is None:
+            return
+        try:
+            rows = await asyncio.to_thread(market_data.fetch_ohlcv, signal.symbol, "15m", 80)
+            chart = make_signal_chart(
+                rows, signal.symbol, signal.side, signal.entry, signal.stop,
+                position.tp1, position.tp2, position.tp3,
+            )
+            entry_time = datetime.fromtimestamp(
+                (signal.timestamp + 15 * 60 * 1000) / 1000, timezone.utc
+            ).strftime("%Y-%m-%d %H:%M:%S UTC")
+            caption = (
+                f"📣 سیگنال جدید دمو | {signal.symbol}\n"
+                f"جهت: {signal.side}\n"
+                f"ورود: {signal.entry:g}\nحد ضرر: {signal.stop:g}\n"
+                f"TP1: {position.tp1:g}\nTP2: {position.tp2:g}\nTP3: {position.tp3:g}\n"
+                f"زمان بسته‌شدن کندل ورود: {entry_time}\n"
+                "حالت: فقط دمو | معاملات واقعی: خاموش"
+            )
+            await bot.send_photo(chat_id=settings.telegram_chat_id, photo=chart, caption=caption)
+        except Exception:
+            logger.exception("Could not create/send signal chart for %s", signal.symbol)
+            send(f"📣 سیگنال دمو {signal.symbol} | {signal.side}\nورود: {signal.entry:g}\n"
+                 f"حد ضرر: {signal.stop:g}\nTP1: {position.tp1:g} | TP2: {position.tp2:g} | TP3: {position.tp3:g}")
+
     def handle_signal(signal: Signal) -> None:
         position = open_demo_from_signal(signal)
         if position is None:
             return
-        send(
-            f"📣 سیگنال جدید دمو | {signal.symbol}\n"
-            f"جهت: {signal.side}\nورود: {signal.entry:g}\n"
-            f"حد ضرر: {signal.stop:g}\n"
-            f"TP1: {position.tp1:g}\nTP2: {position.tp2:g}\nTP3: {position.tp3:g}\n"
-            f"زمان کندل: {signal.timestamp}\nمعاملات واقعی: خاموش"
-        )
+        if bot is not None:
+            asyncio.run_coroutine_threadsafe(send_signal_photo(signal, position), loop)
 
     def handle_trade_event(event: dict) -> None:
         send(
             f"🔔 رویداد معامله دمو | {event['symbol']}\n"
-            f"وضعیت: {event['type']}\nقیمت: {event['price']:g}\n"
+            f"وضعیت: {event['type']}\nقیمت خروج/رویداد: {event['price']:g}\n"
+            f"زمان رویداد: {event['time']}\n"
             f"سود/زیان تحقق‌یافته: {event['realized_pnl']:+.4f} USDT\n"
             "معاملات واقعی: خاموش"
         )
@@ -94,7 +118,6 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
 async def main() -> None:
     settings = Settings()
     settings.assert_demo_only()
-
     store = SQLiteStore(settings.database_path)
     runtime.account, runtime.closed_trade_events = store.load_state(
         DemoAccount(
@@ -104,9 +127,7 @@ async def main() -> None:
         )
     )
     runtime.storage = store
-    # Ensure even a newly initialized account has a durable first snapshot.
     runtime.persist_demo_state()
-
     loop = asyncio.get_running_loop()
     server = uvicorn.Server(uvicorn.Config(app, host=settings.host, port=settings.port, log_level="info"))
     await asyncio.gather(
