@@ -95,14 +95,15 @@ async def main() -> None:
     settings = Settings()
     settings.assert_demo_only()
 
-    runtime.account, runtime.closed_trade_events = SQLiteStore(settings.database_path).load_state(
+    store = SQLiteStore(settings.database_path)
+    runtime.account, runtime.closed_trade_events = store.load_state(
         DemoAccount(
             initial_balance=settings.demo_initial_balance,
             margin_per_trade=settings.demo_margin_per_trade,
             leverage=settings.demo_leverage,
         )
     )
-    runtime.storage = SQLiteStore(settings.database_path)
+    runtime.storage = store
     # Ensure even a newly initialized account has a durable first snapshot.
     runtime.persist_demo_state()
 
