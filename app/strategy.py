@@ -58,6 +58,7 @@ class StrategyConfig:
     break_even_trigger_r: float = 1.0
     use_trailing_stop: bool = False
     trailing_atr_mult: float = 1.5  # Pine input is retained; source uses initial-risk distance.
+    min_tick: float = 0.00000001  # Override from exchange market precision when known.
 
     def __post_init__(self) -> None:
         positive_ints = (self.pivot4, self.body_len, self.ob_search,
@@ -65,6 +66,8 @@ class StrategyConfig:
                          self.atr_len, self.max_bars_since_touch, self.sma_length)
         if any(v < 1 for v in positive_ints):
             raise ValueError("Integer strategy periods and limits must be positive.")
+        if self.min_tick <= 0:
+            raise ValueError("min_tick must be positive.")
         if self.max_stored_ob < 1:
             raise ValueError("max_stored_ob must be positive.")
 
@@ -304,19 +307,22 @@ class OrderBlockStrategy:
             if can_use_ob and retest and direction == 1 and bull_confirm_direction and bull_confirm_strength and self.last_pl15 is not None:
                 base = min(self.last_pl15, bottom) if cfg.use_ob_boundary_sl else self.last_pl15
                 stop = base - atr * cfg.sl_buffer_atr
-                if stop < candle.close:
-                    if not cfg.use_sma200_filter or (sma200 is not None and candle.close > sma200):
-                        ob.used = True
-                        return Signal(self.symbol, "BUY", candle.timestamp, candle.close, stop,
-                                      atr, ob.origin_time, top, bottom, self.trend4h, sma200)
+                if candle.close - stop >= cfg.min_tick:
+                    # Pine selects the first qualifying OB, then applies SMA at entry.
+                    if cfg.use_sma200_filter and (sma200 is None or candle.close <= sma200):
+                        return None
+                    ob.used = True
+                    return Signal(self.symbol, "BUY", candle.timestamp, candle.close, stop,
+                                  atr, ob.origin_time, top, bottom, self.trend4h, sma200)
 
             if can_use_ob and retest and direction == -1 and bear_confirm_direction and bear_confirm_strength and self.last_ph15 is not None:
                 base = max(self.last_ph15, top) if cfg.use_ob_boundary_sl else self.last_ph15
                 stop = base + atr * cfg.sl_buffer_atr
-                if stop > candle.close:
-                    if not cfg.use_sma200_filter or (sma200 is not None and candle.close < sma200):
-                        ob.used = True
-                        return Signal(self.symbol, "SELL", candle.timestamp, candle.close, stop,
-                                      atr, ob.origin_time, top, bottom, self.trend4h, sma200)
+                if stop - candle.close >= cfg.min_tick:
+                    if cfg.use_sma200_filter and (sma200 is None or candle.close >= sma200):
+                        return None
+                    ob.used = True
+                    return Signal(self.symbol, "SELL", candle.timestamp, candle.close, stop,
+                                  atr, ob.origin_time, top, bottom, self.trend4h, sma200)
 
         return None
