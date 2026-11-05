@@ -44,3 +44,32 @@ def test_rejects_duplicate_or_out_of_order_candles():
         pass
     else:
         raise AssertionError("duplicate timestamp should be rejected")
+
+
+def test_15m_touch_and_confirmation_emit_buy_with_ob_boundary_stop():
+    from app.strategy import OrderBlock
+
+    cfg = StrategyConfig(
+        pivot15=1,
+        atr_len=1,
+        require_ob_touch=True,
+        use_touch_freshness=True,
+        use_choch_filter=False,
+        use_retest_filter=False,
+        use_confirm_candle=True,
+        use_confirm_strength=False,
+        use_ob_boundary_sl=True,
+        min_tick=0.001,
+    )
+    engine = OrderBlockStrategy("BTC/USDT", cfg)
+    engine.last_pl15 = 95.0
+    ob = OrderBlock(direction=1, top=100.0, bottom=98.0, origin_time=123)
+    engine.order_blocks.append(ob)
+
+    signal = engine.on_15m_close(bar(1000, 99.5, 101.5, 99.0, 101.0))
+
+    assert signal is not None
+    assert signal.side == "BUY"
+    assert signal.entry == 101.0
+    assert signal.stop < 98.0
+    assert ob.used
