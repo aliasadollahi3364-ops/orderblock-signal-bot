@@ -44,6 +44,7 @@ async def run_telegram(token: str, chat_id: str) -> None:
 
 async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> None:
     market_data = WeexMarketData(settings.exchange_id, settings.quote_currency)
+    runtime.market_symbol_resolver = market_data.resolve_manual_symbol
     bot = Bot(token=settings.telegram_bot_token) if settings.telegram_bot_token and settings.telegram_chat_id else None
     if bot is not None:
         await bot.initialize()
@@ -127,6 +128,7 @@ async def main() -> None:
         )
     )
     runtime.storage = store
+    runtime.manual_symbols = store.load_manual_symbols()
     runtime.persist_demo_state()
     loop = asyncio.get_running_loop()
     server = uvicorn.Server(uvicorn.Config(app, host=settings.host, port=settings.port, log_level="info"))
