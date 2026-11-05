@@ -9,8 +9,11 @@ from telegram import Bot
 
 from app.api import app
 from app.config import Settings
+from app.demo import DemoAccount
 from app.market_data import WeexMarketData
+from app.runtime import runtime
 from app.scanner import AutomaticScanner, open_demo_from_signal
+from app.storage import SQLiteStore
 from app.strategy import Signal
 from app.telegram_bot import build_telegram_application
 
@@ -46,8 +49,7 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
     def send(text: str) -> None:
         if bot is not None:
             future = asyncio.run_coroutine_threadsafe(
-                bot.send_message(chat_id=settings.telegram_chat_id, text=text),
-                loop,
+                bot.send_message(chat_id=settings.telegram_chat_id, text=text), loop
             )
             future.add_done_callback(
                 lambda result: logger.error("Telegram notification failed: %s", result.exception())
@@ -92,6 +94,18 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
 async def main() -> None:
     settings = Settings()
     settings.assert_demo_only()
+
+    runtime.account, runtime.closed_trade_events = SQLiteStore(settings.database_path).load_state(
+        DemoAccount(
+            initial_balance=settings.demo_initial_balance,
+            margin_per_trade=settings.demo_margin_per_trade,
+            leverage=settings.demo_leverage,
+        )
+    )
+    runtime.storage = SQLiteStore(settings.database_path)
+    # Ensure even a newly initialized account has a durable first snapshot.
+    runtime.persist_demo_state()
+
     loop = asyncio.get_running_loop()
     server = uvicorn.Server(uvicorn.Config(app, host=settings.host, port=settings.port, log_level="info"))
     await asyncio.gather(
