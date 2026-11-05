@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.demo import DemoAccount
+from app.strategy import StrategyConfig
 
 
 @dataclass
@@ -20,6 +21,7 @@ class BotRuntime:
     closed_trade_events: list[dict[str, Any]] = field(default_factory=list)
     storage: Any = None
     market_symbol_resolver: Any = None
+    strategy_config: StrategyConfig = field(default_factory=StrategyConfig)
 
     def persist_demo_state(self) -> None:
         if self.storage is not None:
