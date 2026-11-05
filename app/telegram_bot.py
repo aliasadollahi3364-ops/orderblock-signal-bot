@@ -1,10 +1,13 @@
 """Telegram status interface. This module cannot submit exchange orders."""
 from __future__ import annotations
 
+from dataclasses import asdict
+
 from telegram import Update
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes
 
 from app.runtime import runtime
+from app.strategy import StrategyConfig
 
 
 async def _authorized(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -33,12 +36,39 @@ def _account_text() -> str:
     )
 
 
+def _strategy_text() -> str:
+    cfg = StrategyConfig()
+    labels = {
+        "pivot4": "پیوت ۴ساعته", "body_len": "میانگین بدنه کندل ۴ساعته",
+        "ob_search": "جستجوی کندل اردربلاک", "max_stored_ob": "حداکثر OB ذخیره",
+        "pivot15": "پیوت ۱۵دقیقه", "max_wait": "حداکثر انتظار CHoCH",
+        "atr_len": "دوره ATR", "use_trend_filter": "فیلتر روند",
+        "require_ob_touch": "الزام برخورد به OB", "use_touch_freshness": "تازگی برخورد",
+        "max_bars_since_touch": "حداکثر کندل از برخورد", "use_choch_filter": "فیلتر CHoCH",
+        "use_choch_strength": "قدرت CHoCH", "min_choch_body_atr": "حداقل بدنه CHoCH/ATR",
+        "use_retest_filter": "فیلتر Retest", "retest_atr": "تلورانس Retest/ATR",
+        "use_confirm_candle": "کندل تأیید", "use_confirm_strength": "قدرت کندل تأیید",
+        "min_confirm_body_atr": "حداقل بدنه تأیید/ATR", "sl_buffer_atr": "بافر حدضرر/ATR",
+        "use_ob_boundary_sl": "حدضرر مرز OB", "sma_length": "دوره SMA",
+        "use_sma200_filter": "فیلتر SMA200", "use_break_even": "حدضرر سر به سر",
+        "break_even_trigger_r": "فعال‌سازی BE برحسب R", "use_trailing_stop": "تریلینگ استاپ",
+        "trailing_atr_mult": "ضریب تریلینگ", "min_tick": "حداقل گام قیمت",
+    }
+    lines = ["⚙️ تنظیمات استراتژی اسکنر", "منبع تنظیمات: StrategyConfig فعلی ربات"]
+    for key, value in asdict(cfg).items():
+        shown = "روشن" if value is True else "خاموش" if value is False else str(value)
+        lines.append(f"{labels.get(key, key)}: {shown}")
+    lines.append("\nتایم‌فریم اردربلاک: 4H | تایم‌فریم ورود: 15m")
+    lines.append("توجه: این خروجی مقادیر پیش‌فرض موتور استراتژی را نشان می‌دهد.")
+    return "\n".join(lines)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized(update, context):
         return
     await update.effective_message.reply_text(
         "ربات سیگنال اردربلاک آماده است. این نسخه فقط حساب دمو دارد.\n"
-        "دستورات: /status /demo /open /stats /help"
+        "دستورات: /status /demo /open /stats /strategy /help"
     )
 
 
@@ -56,9 +86,8 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def demo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _authorized(update, context):
-        return
-    await update.effective_message.reply_text(_account_text())
+    if await _authorized(update, context):
+        await update.effective_message.reply_text(_account_text())
 
 
 async def open_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -72,7 +101,7 @@ async def open_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     for p in positions:
         lines.append(
             f"{p.symbol} | {p.side.value}\n"
-            f"ورود: {p.entry:g} | استاپ: {p.stop:g}\n"
+            f"ورود: {p.entry:g} | استاپ فعلی: {p.stop:g}\n"
             f"TP1: {p.tp1:g} | TP2: {p.tp2:g} | TP3: {p.tp3:g}"
         )
     await update.effective_message.reply_text("\n\n".join(lines))
@@ -85,20 +114,23 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     realized = sum(p.realized_pnl for p in acct.positions.values())
     closed = sum(1 for p in acct.positions.values() if p.closed)
     await update.effective_message.reply_text(
-        f"آمار حساب دمو\n"
-        f"موجودی فعلی: {float(acct.balance or 0):.2f} USDT\n"
+        f"آمار حساب دمو\nموجودی فعلی: {float(acct.balance or 0):.2f} USDT\n"
         f"سود/زیان ثبت‌شده معاملات: {realized:+.4f} USDT\n"
-        f"معاملات بسته‌شده: {closed}\n"
-        f"معاملات باز: {len(acct.open_positions)}"
+        f"معاملات بسته‌شده: {closed}\nمعاملات باز: {len(acct.open_positions)}"
     )
+
+
+async def strategy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await _authorized(update, context):
+        await update.effective_message.reply_text(_strategy_text())
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized(update, context):
         return
     await update.effective_message.reply_text(
-        "/start - شروع\n/status - وضعیت ربات\n/demo - موجودی و مارجین دمو\n"
-        "/open - معاملات باز\n/stats - آمار حساب\n/help - راهنما"
+        "/start - شروع\n/status - وضعیت ربات\n/demo - موجودی دمو\n"
+        "/open - معاملات باز\n/stats - آمار حساب\n/strategy - تنظیمات استراتژی\n/help - راهنما"
     )
 
 
@@ -107,10 +139,10 @@ def build_telegram_application(token: str, allowed_chat_id: str) -> Application:
         raise ValueError("TELEGRAM_CHAT_ID is required to restrict bot access.")
     application = ApplicationBuilder().token(token).build()
     application.bot_data["allowed_chat_id"] = allowed_chat_id
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("status", status))
-    application.add_handler(CommandHandler("demo", demo))
-    application.add_handler(CommandHandler("open", open_positions))
-    application.add_handler(CommandHandler("stats", stats))
-    application.add_handler(CommandHandler("help", help_command))
+    for command, callback in (
+        ("start", start), ("status", status), ("demo", demo),
+        ("open", open_positions), ("stats", stats), ("strategy", strategy),
+        ("help", help_command),
+    ):
+        application.add_handler(CommandHandler(command, callback))
     return application
