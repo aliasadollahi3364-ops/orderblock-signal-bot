@@ -194,7 +194,7 @@ class AutomaticScanner:
                     record = {
                         "symbol": position.symbol,
                         "side": position.side.value,
-                        "time": datetime.now(timezone.utc).isoformat(),
+                        "time": datetime.fromtimestamp((bar.timestamp + MS_15M) / 1000, timezone.utc).isoformat(),
                         **event,
                         "realized_pnl": position.realized_pnl,
                     }
@@ -226,7 +226,8 @@ def open_demo_from_signal(signal: Signal):
     """Open a single fixed-size internal demo position; never touches exchange orders."""
     side = Side.LONG if signal.side == "BUY" else Side.SHORT
     try:
-        position = runtime.account.open_position(signal.symbol, side, signal.entry, signal.stop)
+        entry_time = datetime.fromtimestamp((signal.timestamp + MS_15M) / 1000, timezone.utc).isoformat()
+        position = runtime.account.open_position(signal.symbol, side, signal.entry, signal.stop, opened_at=entry_time)
         runtime.persist_demo_state()
         return position
     except ValueError as exc:
