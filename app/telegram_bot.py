@@ -37,7 +37,7 @@ def _account_text() -> str:
 
 
 def _strategy_text() -> str:
-    cfg = StrategyConfig()
+    cfg = runtime.strategy_config or StrategyConfig()
     labels = {
         "pivot4": "پیوت ۴ساعته", "body_len": "میانگین بدنه کندل ۴ساعته",
         "ob_search": "جستجوی کندل اردربلاک", "max_stored_ob": "حداکثر OB ذخیره",
@@ -205,7 +205,110 @@ async def auto_pairs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 async def strategy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await _authorized(update, context):
-        await update.effective_message.reply_text(_strategy_text())
+        await update.effective_message.reply_text(
+            _strategy_text()
+            + "\\n\\nبرای تغییر: /enable sma200 یا /disable sma200"
+            + "\\nبرای عددها: /set pivot4 4"
+            + "\\nبازنشانی: /reset_strategy"
+        )
+
+
+STRATEGY_ALIASES = {
+    "trend": "use_trend_filter",
+    "ob_touch": "require_ob_touch",
+    "touch_freshness": "use_touch_freshness",
+    "choch": "use_choch_filter",
+    "choch_strength": "use_choch_strength",
+    "retest": "use_retest_filter",
+    "confirm_candle": "use_confirm_candle",
+    "confirm_strength": "use_confirm_strength",
+    "ob_boundary_sl": "use_ob_boundary_sl",
+    "sma200": "use_sma200_filter",
+    "break_even": "use_break_even",
+    "trailing": "use_trailing_stop",
+}
+
+
+def _save_strategy_config(config: StrategyConfig) -> None:
+    runtime.strategy_config = config
+    if runtime.storage is not None:
+        runtime.storage.save_strategy_config(config)
+
+
+async def set_strategy_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    if len(context.args) != 2:
+        await update.effective_message.reply_text(
+            "فرمت: /set نام_تنظیم مقدار\\nمثال: /set pivot4 4\\n"
+            "برای روشن/خاموش کردن از /enable و /disable استفاده کن."
+        )
+        return
+    key = STRATEGY_ALIASES.get(context.args[0].lower(), context.args[0].lower())
+    values = asdict(runtime.strategy_config or StrategyConfig())
+    if key not in values:
+        await update.effective_message.reply_text("نام تنظیم پیدا نشد. برای دیدن نام‌ها /strategy را بفرست.")
+        return
+    current = values[key]
+    if isinstance(current, bool):
+        await update.effective_message.reply_text("این گزینه روشن/خاموش است؛ از /enable یا /disable استفاده کن.")
+        return
+    try:
+        value = int(context.args[1]) if isinstance(current, int) else float(context.args[1])
+        if isinstance(value, float) and not __import__("math").isfinite(value):
+            raise ValueError("عدد باید معتبر باشد.")
+        values[key] = value
+        updated = StrategyConfig(**values)
+        if key in {"min_choch_body_atr", "min_confirm_body_atr", "sl_buffer_atr"} and not 0 <= value <= 5:
+            raise ValueError("مقدار باید بین 0 تا 5 باشد.")
+        if key in {"retest_atr"} and not 0 <= value <= 5:
+            raise ValueError("مقدار باید بین 0 تا 5 باشد.")
+        if key in {"break_even_trigger_r", "trailing_atr_mult"} and not 0 < value <= 20:
+            raise ValueError("مقدار باید بیشتر از صفر و حداکثر 20 باشد.")
+        if key == "min_tick" and value <= 0:
+            raise ValueError("min_tick باید بیشتر از صفر باشد.")
+        _save_strategy_config(updated)
+        await update.effective_message.reply_text(f"✅ {key} روی {value} تنظیم شد و از اسکن بعدی اعمال می‌شود.")
+    except (TypeError, ValueError) as exc:
+        await update.effective_message.reply_text(f"❌ مقدار نامعتبر است: {exc}")
+
+
+async def toggle_strategy_value(update: Update, context: ContextTypes.DEFAULT_TYPE, enabled: bool) -> None:
+    if not await _authorized(update, context):
+        return
+    if len(context.args) != 1:
+        await update.effective_message.reply_text(
+            "نام گزینه را وارد کن. مثال: /enable sma200 یا /disable trailing"
+        )
+        return
+    key = STRATEGY_ALIASES.get(context.args[0].lower(), context.args[0].lower())
+    values = asdict(runtime.strategy_config or StrategyConfig())
+    if key not in values or not isinstance(values[key], bool):
+        await update.effective_message.reply_text(
+            "گزینه روشن/خاموش پیدا نشد. نام‌های کوتاه: trend, ob_touch, choch, retest, "
+            "confirm_candle, sma200, break_even, trailing"
+        )
+        return
+    values[key] = enabled
+    _save_strategy_config(StrategyConfig(**values))
+    state = "روشن" if enabled else "خاموش"
+    await update.effective_message.reply_text(f"✅ {key}: {state}؛ از اسکن بعدی اعمال می‌شود.")
+
+
+async def enable_strategy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await toggle_strategy_value(update, context, True)
+
+
+async def disable_strategy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await toggle_strategy_value(update, context, False)
+
+
+async def reset_strategy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    config = StrategyConfig()
+    _save_strategy_config(config)
+    await update.effective_message.reply_text("تنظیمات استراتژی به پیش‌فرض کد بازگشت و ذخیره شد.")
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -225,7 +328,7 @@ def build_telegram_application(token: str, allowed_chat_id: str) -> Application:
     for command, callback in (
         ("start", start), ("status", status), ("demo", demo),
         ("open", open_positions), ("pairs", pairs), ("add", add_pair), ("remove", remove_pair), ("auto_pairs", auto_pairs), ("stats", stats), ("strategy", strategy),
-        ("help", help_command),
+        ("set", set_strategy_value), ("enable", enable_strategy), ("disable", disable_strategy), ("reset_strategy", reset_strategy), ("help", help_command),
     ):
         application.add_handler(CommandHandler(command, callback))
     return application
