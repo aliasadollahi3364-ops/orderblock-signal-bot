@@ -13,6 +13,25 @@ def test_to_candles_sorts_and_deduplicates_exchange_rows():
     assert isinstance(bars[0], Candle)
 
 
+def test_to_candles_skips_zero_nonfinite_and_inconsistent_ohlc_rows():
+    bars = _to_candles([
+        [1000, 0, 0, 0, 0, 1],
+        [2000, 10, 11, 9, float("nan"), 1],
+        [3000, 10, 9, 8, 10, 1],
+        [4000, 10, 11, 9, 10, 1],
+    ])
+    assert [bar.timestamp for bar in bars] == [4000]
+
+
+def test_to_candles_skips_malformed_rows_without_aborting():
+    bars = _to_candles([
+        [1000, 10, 11, 9, 10, 1],
+        [2000, "bad", 11, 9, 10, 1],
+        [3000, 10, 11, 9, 10, 1],
+    ])
+    assert [bar.timestamp for bar in bars] == [1000, 3000]
+
+
 def test_active_ob_distance_is_zero_inside_zone():
     engine = OrderBlockStrategy("BTC/USDT")
     engine.order_blocks.append(OrderBlock(1, 105, 100, 1))
