@@ -129,6 +129,7 @@ async def main() -> None:
     )
     runtime.storage = store
     runtime.manual_symbols = store.load_manual_symbols()
+    runtime.strategy_config = store.load_strategy_config()
     runtime.persist_demo_state()
     loop = asyncio.get_running_loop()
     server = uvicorn.Server(uvicorn.Config(app, host=settings.host, port=settings.port, log_level="info"))
