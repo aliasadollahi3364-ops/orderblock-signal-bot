@@ -19,6 +19,7 @@ class BotRuntime:
     signal_count: int = 0
     closed_trade_events: list[dict[str, Any]] = field(default_factory=list)
     storage: Any = None
+    market_symbol_resolver: Any = None
 
     def persist_demo_state(self) -> None:
         if self.storage is not None:
