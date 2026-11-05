@@ -1,12 +1,7 @@
-"""Internal-only demo trading ledger.
-
-This module never sends orders to an exchange. Prices and quantities use a
-linear USDT-settled contract approximation; exchange-specific contract
-metadata must be validated before production market-data integration.
-"""
+"""Internal-only demo trading ledger; no exchange order APIs are used."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
@@ -46,7 +41,7 @@ class DemoAccount:
     leverage: float = 5.0
     fee_rate: float = 0.0005
     balance: Optional[float] = None
-    position: Optional[DemoPosition] = None
+    positions: dict[str, DemoPosition] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.balance is None:
@@ -60,40 +55,51 @@ class DemoAccount:
     def notional(self) -> float:
         return self.margin_per_trade * self.leverage
 
+    @property
+    def position(self) -> Optional[DemoPosition]:
+        """Compatibility accessor for the most recently opened position."""
+        return next(reversed(self.positions.values()), None) if self.positions else None
+
+    @property
+    def open_positions(self) -> list[DemoPosition]:
+        return [p for p in self.positions.values() if not p.closed]
+
+    @property
+    def margin_used(self) -> float:
+        return len(self.open_positions) * self.margin_per_trade
+
+    @property
+    def free_margin(self) -> float:
+        assert self.balance is not None
+        return max(0.0, self.balance - self.margin_used)
+
     def open_position(self, symbol: str, side: Side, entry: float, stop: float) -> DemoPosition:
-        if self.position is not None and not self.position.closed:
-            raise ValueError("Only one demo position is supported per account.")
+        if symbol in self.positions and not self.positions[symbol].closed:
+            raise ValueError(f"An open demo position already exists for {symbol}.")
         if entry <= 0 or stop <= 0:
             raise ValueError("Entry and stop must be positive.")
         if side is Side.LONG and stop >= entry:
             raise ValueError("Long stop must be below entry.")
         if side is Side.SHORT and stop <= entry:
             raise ValueError("Short stop must be above entry.")
-        if self.balance is None or self.balance < self.margin_per_trade:
-            raise ValueError("Insufficient demo balance for required margin.")
+        if self.free_margin < self.margin_per_trade:
+            raise ValueError("Insufficient free demo margin.")
 
         qty = self.notional / entry
         risk = abs(entry - stop)
         fee = self.notional * self.fee_rate
+        assert self.balance is not None
         self.balance -= fee
-        if side is Side.LONG:
-            targets = (entry + risk, entry + 2 * risk, entry + 3 * risk)
-        else:
-            targets = (entry - risk, entry - 2 * risk, entry - 3 * risk)
-
-        self.position = DemoPosition(
-            symbol=symbol,
-            side=side,
-            entry=entry,
-            stop=stop,
-            initial_stop=stop,
-            quantity_initial=qty,
-            quantity_remaining=qty,
-            tp1=targets[0],
-            tp2=targets[1],
-            tp3=targets[2],
+        targets = ((entry + risk, entry + 2 * risk, entry + 3 * risk)
+                   if side is Side.LONG else
+                   (entry - risk, entry - 2 * risk, entry - 3 * risk))
+        position = DemoPosition(
+            symbol=symbol, side=side, entry=entry, stop=stop, initial_stop=stop,
+            quantity_initial=qty, quantity_remaining=qty,
+            tp1=targets[0], tp2=targets[1], tp3=targets[2],
         )
-        return self.position
+        self.positions[symbol] = position
+        return position
 
     def _close_fraction(self, pos: DemoPosition, fraction: float, price: float) -> float:
         qty = min(pos.quantity_initial * fraction, pos.quantity_remaining)
@@ -103,19 +109,25 @@ class DemoAccount:
         gross = (price - pos.entry) * qty * direction
         fee = price * qty * self.fee_rate
         net = gross - fee
-        pos.quantity_remaining -= qty
+        pos.quantity_remaining = max(0.0, pos.quantity_remaining - qty)
         pos.realized_pnl += net
         assert self.balance is not None
         self.balance += gross - fee
         return net
 
-    def process_candle(self, high: float, low: float) -> list[dict[str, float | str]]:
-        """Process one completed candle; stop takes priority on ambiguous bars."""
-        pos = self.position
-        if pos is None or pos.closed:
-            return []
+    def process_candle(self, high: float, low: float, symbol: Optional[str] = None) -> list[dict[str, float | str]]:
+        """Process one completed OHLC range; the stop wins ambiguous initial bars."""
         if high < low:
             raise ValueError("Candle high cannot be below low.")
+        if symbol is None:
+            active = self.open_positions
+            if len(active) != 1:
+                raise ValueError("Pass symbol when zero or multiple demo positions are open.")
+            pos = active[0]
+        else:
+            pos = self.positions.get(symbol)
+        if pos is None or pos.closed:
+            return []
 
         events: list[dict[str, float | str]] = []
         long_side = pos.side is Side.LONG
@@ -135,8 +147,6 @@ class DemoAccount:
             pos.tp1_done = True
             pos.stop = pos.entry
             events.append({"type": "TP1", "price": pos.tp1})
-            # If the same OHLC candle also crosses the newly moved stop,
-            # assume the stop happened first after TP1 (conservative fill).
             moved_stop_hit = low <= pos.stop if long_side else high >= pos.stop
             if moved_stop_hit:
                 self._close_fraction(pos, 1.0, pos.stop)
@@ -163,13 +173,25 @@ class DemoAccount:
             events.append({"type": "TP3", "price": pos.tp3})
         return events
 
-    def unrealized_pnl(self, mark_price: float) -> float:
-        pos = self.position
-        if pos is None or pos.closed:
-            return 0.0
-        direction = 1.0 if pos.side is Side.LONG else -1.0
-        return (mark_price - pos.entry) * pos.quantity_remaining * direction
+    def unrealized_pnl(self, mark_price: float, symbol: Optional[str] = None) -> float:
+        if symbol is not None:
+            selected = [self.positions[symbol]] if symbol in self.positions else []
+        else:
+            selected = self.open_positions
+            if len(selected) > 1:
+                raise ValueError("Pass symbol when valuing multiple open positions.")
+        total = 0.0
+        for pos in selected:
+            if pos.closed:
+                continue
+            direction = 1.0 if pos.side is Side.LONG else -1.0
+            total += (mark_price - pos.entry) * pos.quantity_remaining * direction
+        return total
 
-    def equity(self, mark_price: Optional[float] = None) -> float:
+    def equity(self, mark_prices: Optional[dict[str, float]] = None) -> float:
         assert self.balance is not None
-        return self.balance + (self.unrealized_pnl(mark_price) if mark_price is not None else 0.0)
+        unrealized = 0.0
+        if mark_prices:
+            for symbol, mark in mark_prices.items():
+                unrealized += self.unrealized_pnl(mark, symbol)
+        return self.balance + unrealized
