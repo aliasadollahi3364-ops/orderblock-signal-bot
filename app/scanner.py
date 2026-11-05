@@ -87,6 +87,7 @@ class AutomaticScanner:
         universe_limit: int = 500,
         candidate_limit: int = 60,
         on_signal: Callable[[Signal], None] | None = None,
+        on_trade_event: Callable[[dict], None] | None = None,
     ):
         if universe_limit < 1 or candidate_limit < 1:
             raise ValueError("Scanner limits must be positive.")
@@ -95,6 +96,8 @@ class AutomaticScanner:
         self.universe_limit = universe_limit
         self.candidate_limit = candidate_limit
         self.on_signal = on_signal
+        self.on_trade_event = on_trade_event
+        self._last_demo_bar: dict[str, int] = {}
         self._last_signal_bar: dict[str, int] = {}
         self._selected: list[str] = []
 
@@ -154,6 +157,39 @@ class AutomaticScanner:
             except Exception:
                 errors += 1
                 log.exception("15m strategy evaluation failed for %s", market.symbol)
+
+        # Independently manage existing demo positions, even if their symbols
+        # are no longer among the current OB candidates.
+        for position in list(runtime.account.open_positions):
+            try:
+                rows = self.market_data.fetch_ohlcv(position.symbol, "15m", 2)
+                bars = _to_candles(rows)
+                if not bars:
+                    continue
+                bar = bars[-1]
+                now_ms = int(time.time() * 1000)
+                if bar.timestamp + MS_15M > now_ms:
+                    continue
+                if self._last_demo_bar.get(position.symbol) == bar.timestamp:
+                    continue
+                self._last_demo_bar[position.symbol] = bar.timestamp
+                events = runtime.account.process_candle(
+                    high=bar.high, low=bar.low, symbol=position.symbol
+                )
+                for event in events:
+                    record = {
+                        "symbol": position.symbol,
+                        "side": position.side.value,
+                        "time": datetime.now(timezone.utc).isoformat(),
+                        **event,
+                        "realized_pnl": position.realized_pnl,
+                    }
+                    runtime.closed_trade_events.append(record)
+                    if self.on_trade_event:
+                        self.on_trade_event(record)
+            except Exception:
+                errors += 1
+                log.exception("Demo position management failed for %s", position.symbol)
 
         # Keep only valid OB candidates. Do not pad to 60 with ineligible pairs.
         self._selected = [market.symbol for market in selected_markets]
