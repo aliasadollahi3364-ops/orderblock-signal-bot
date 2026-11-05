@@ -14,11 +14,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("orderblock-signal-bot")
 
 
-async def run_telegram(token: str) -> None:
-    if not token:
-        logger.warning("TELEGRAM_BOT_TOKEN is empty; Telegram polling is disabled.")
+async def run_telegram(token: str, chat_id: str) -> None:
+    if not token or not chat_id:
+        logger.warning("Telegram is disabled until both TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are configured.")
         return
-    application = build_telegram_application(token)
+    application = build_telegram_application(token, chat_id)
     await application.initialize()
     await application.start()
     if application.updater is None:
@@ -39,7 +39,7 @@ async def main() -> None:
     server = uvicorn.Server(
         uvicorn.Config(app, host=settings.host, port=settings.port, log_level="info")
     )
-    await asyncio.gather(server.serve(), run_telegram(settings.telegram_bot_token))
+    await asyncio.gather(server.serve(), run_telegram(settings.telegram_bot_token, settings.telegram_chat_id))
 
 
 if __name__ == "__main__":
