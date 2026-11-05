@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from app.demo import DemoAccount, DemoPosition, Side
+from app.strategy import StrategyConfig
 
 
 class SQLiteStore:
@@ -114,6 +115,26 @@ class SQLiteStore:
         with self._connect() as db:
             row = db.execute("SELECT value FROM scanner_settings WHERE key='manual_symbols'").fetchone()
             return json.loads(row["value"]) if row else []
+
+    def save_strategy_config(self, config: StrategyConfig) -> None:
+        with self._connect() as db:
+            db.execute(
+                "INSERT INTO scanner_settings(key, value) VALUES ('strategy_config', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (json.dumps(asdict(config), separators=(",", ":")),),
+            )
+
+    def load_strategy_config(self) -> StrategyConfig:
+        with self._connect() as db:
+            row = db.execute("SELECT value FROM scanner_settings WHERE key='strategy_config'").fetchone()
+            if row is None:
+                return StrategyConfig()
+            try:
+                values = json.loads(row["value"])
+                allowed = set(StrategyConfig.__dataclass_fields__)
+                return StrategyConfig(**{key: value for key, value in values.items() if key in allowed})
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return StrategyConfig()
 
     def load_state(self, default_account: DemoAccount) -> tuple[DemoAccount, list[dict[str, Any]]]:
         with self._connect() as db:
