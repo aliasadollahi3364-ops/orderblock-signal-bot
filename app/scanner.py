@@ -123,6 +123,8 @@ class AutomaticScanner:
         runtime.scanner_state = "SCANNING_MARKETS"
         runtime.last_scan_at = datetime.now(timezone.utc)
         errors = 0
+        # Read the latest persisted Telegram settings once per scan cycle.
+        strategy_config = runtime.strategy_config or self.strategy_config
         try:
             markets = self.market_data.fetch_usdt_perpetuals(self.universe_limit)
         except Exception:
@@ -146,7 +148,7 @@ class AutomaticScanner:
                 bars4 = _to_candles(self.market_data.fetch_ohlcv(market.symbol, "4h", 220))
                 if len(bars4) < 30:
                     continue
-                htf_engine = OrderBlockStrategy(market.symbol, self.strategy_config)
+                htf_engine = OrderBlockStrategy(market.symbol, strategy_config)
                 now_ms = int(time.time() * 1000)
                 for bar in bars4:
                     if bar.timestamp + MS_4H <= now_ms:
@@ -179,7 +181,7 @@ class AutomaticScanner:
             try:
                 bars4 = market_cache[market.symbol][0]
                 bars15 = _to_candles(self.market_data.fetch_ohlcv(market.symbol, "15m", 320))
-                engine = OrderBlockStrategy(market.symbol, self.strategy_config)
+                engine = OrderBlockStrategy(market.symbol, strategy_config)
                 signal = _ordered_feed(engine, bars4, bars15)
                 if signal is not None and self._last_signal_bar.get(signal.symbol) != signal.timestamp:
                     self._last_signal_bar[signal.symbol] = signal.timestamp
