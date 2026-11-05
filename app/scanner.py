@@ -53,15 +53,13 @@ def _ordered_feed(engine: OrderBlockStrategy, bars4: list[Candle],
     now_ms = int(time.time() * 1000)
     for close_time, kind, bar in events:
         if close_time > now_ms:
-            continue  # never evaluate an unfinished candle
+            continue
         if kind == 0:
             engine.on_4h_close(bar)
         else:
             signal = engine.on_15m_close(bar)
             if signal is not None:
                 latest_signal = signal
-    # Historical signals are not actionable. Only a signal on the latest
-    # completed 15m bar may trigger a new demo position.
     completed_15m = [b for b in bars15 if b.timestamp + MS_15M <= now_ms]
     if not completed_15m or latest_signal is None:
         return None
@@ -72,10 +70,12 @@ def _active_ob_distance(engine: OrderBlockStrategy, price: float) -> float | Non
     zones = [ob for ob in engine.order_blocks if ob.active and not ob.used]
     if not zones:
         return None
+
     def distance(ob):
         if ob.bottom <= price <= ob.top:
             return 0.0
         return min(abs(price - ob.top), abs(price - ob.bottom)) / max(price, 1e-12)
+
     return min(distance(ob) for ob in zones)
 
 
@@ -130,8 +130,6 @@ class AutomaticScanner:
                 distance = _active_ob_distance(htf_engine, last_price)
                 if distance is None:
                     continue
-                # OB proximity ranks existing valid zones; no extra strategy
-                # entry condition or arbitrary distance cutoff is introduced.
                 score = market.rank_score / (1.0 + distance * 100.0)
                 ob_ranked.append((score, market))
                 market_cache[market.symbol] = (bars4, [], last_price)
@@ -151,8 +149,6 @@ class AutomaticScanner:
                 signal = _ordered_feed(engine, bars4, bars15)
                 if signal is not None and self._last_signal_bar.get(signal.symbol) != signal.timestamp:
                     self._last_signal_bar[signal.symbol] = signal.timestamp
-                    # The entry candle must not also be replayed as post-entry
-                    # price action in the demo position manager.
                     self._last_demo_bar[signal.symbol] = signal.timestamp
                     signals.append(signal)
                     if self.on_signal:
@@ -161,8 +157,6 @@ class AutomaticScanner:
                 errors += 1
                 log.exception("15m strategy evaluation failed for %s", market.symbol)
 
-        # Independently manage existing demo positions, even if their symbols
-        # are no longer among the current OB candidates.
         for position in list(runtime.account.open_positions):
             try:
                 rows = self.market_data.fetch_ohlcv(position.symbol, "15m", 2)
@@ -172,9 +166,7 @@ class AutomaticScanner:
                 now_ms = int(time.time() * 1000)
                 bar = next((item for item in reversed(bars)
                             if item.timestamp + MS_15M <= now_ms), None)
-                if bar is None:
-                    continue
-                if self._last_demo_bar.get(position.symbol) == bar.timestamp:
+                if bar is None or self._last_demo_bar.get(position.symbol) == bar.timestamp:
                     continue
                 self._last_demo_bar[position.symbol] = bar.timestamp
                 events = runtime.account.process_candle(
@@ -191,11 +183,12 @@ class AutomaticScanner:
                     runtime.closed_trade_events.append(record)
                     if self.on_trade_event:
                         self.on_trade_event(record)
+                if events:
+                    runtime.persist_demo_state()
             except Exception:
                 errors += 1
                 log.exception("Demo position management failed for %s", position.symbol)
 
-        # Keep only valid OB candidates. Do not pad to 60 with ineligible pairs.
         self._selected = [market.symbol for market in selected_markets]
         runtime.selected_symbols = list(self._selected)
         runtime.signal_count += len(signals)
@@ -216,6 +209,7 @@ def open_demo_from_signal(signal: Signal):
     side = Side.LONG if signal.side == "BUY" else Side.SHORT
     try:
         position = runtime.account.open_position(signal.symbol, side, signal.entry, signal.stop)
+        runtime.persist_demo_state()
         return position
     except ValueError as exc:
         log.info("Demo entry skipped for %s: %s", signal.symbol, exc)
