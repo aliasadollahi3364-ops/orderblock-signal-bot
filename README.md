@@ -42,7 +42,7 @@ The agreed demo position management is:
 - GitHub Actions workflow to run the Python unit tests.
 - Validated environment settings with a hard guard against enabling live trading.
 
-The persistent database, automatic 500-market/60-candidate scanner orchestration, signal-to-demo auto-entry loop, rich web dashboard, Telegram signal notifications, and HOKAS deployment are still pending. The current market-data adapter has not yet been verified against live WEEX responses, and CI results must be checked before relying on the implementation.
+The scanner orchestration and demo signal/position loop are now committed, but still require verification against live public WEEX market responses and candle-by-candle comparison against TradingView. Liquidity ranking currently uses 24h quote volume and bid/ask spread; exchange-wide order-book depth ranking is not implemented. Scanner state and demo positions are in memory and will reset on process restart; persistent storage and the rich web dashboard remain pending. CI results must be checked before relying on the implementation.
 
 ## Run locally
 
@@ -52,4 +52,4 @@ The current dashboard API is read-only and reports scanner state as NOT_STARTED 
 
 ## Status
 
-The strategy engine, demo accounting, read-only API, and basic Telegram commands have been committed. They still require test execution, candle-by-candle comparison against TradingView, WEEX market-data verification, scanner orchestration, and deployment. No live trading functionality is implemented.
+The strategy engine, demo accounting, read-only API, basic Telegram commands, two-stage scanner, cached market data, and demo signal/position event loop have been committed. They still require test execution, candle-by-candle comparison against TradingView, live WEEX market-data verification, persistence, and deployment. No live trading functionality is implemented.
