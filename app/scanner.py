@@ -130,6 +130,15 @@ class AutomaticScanner:
             log.exception("Failed to load WEEX USDT perpetual universe")
             return ScanSummary(0, 0, 0, 0, 1)
 
+        manual_markets: list[MarketCandidate] = []
+        for requested in list(runtime.manual_symbols):
+            try:
+                manual_markets.append(self.market_data.resolve_manual_symbol(requested))
+            except Exception:
+                log.warning("Manual symbol unavailable on WEEX: %s", requested)
+        known = {item.symbol for item in markets}
+        markets.extend(item for item in manual_markets if item.symbol not in known)
+
         ob_ranked: list[tuple[float, MarketCandidate]] = []
         market_cache: dict[str, tuple[list[Candle], list[Candle], float]] = {}
         for market in markets:
@@ -156,7 +165,14 @@ class AutomaticScanner:
                 log.exception("4h OB screening failed for %s", market.symbol)
 
         ob_ranked.sort(key=lambda item: item[0], reverse=True)
-        selected_markets = [market for _, market in ob_ranked[:self.candidate_limit]]
+        automatic_markets = [market for _, market in ob_ranked[:self.candidate_limit]]
+        qualified_manual = {market.symbol for _, market in ob_ranked
+                            if market.symbol in set(runtime.manual_symbols)}
+        selected_by_symbol = {market.symbol: market for market in automatic_markets}
+        for market in manual_markets:
+            if market.symbol in qualified_manual:
+                selected_by_symbol[market.symbol] = market
+        selected_markets = list(selected_by_symbol.values())
         signals: list[Signal] = []
         runtime.scanner_state = "SCANNING_15M"
         for market in selected_markets:
