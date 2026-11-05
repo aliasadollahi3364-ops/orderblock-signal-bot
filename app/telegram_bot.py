@@ -68,7 +68,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await update.effective_message.reply_text(
         "ربات سیگنال اردربلاک آماده است. این نسخه فقط حساب دمو دارد.\n"
-        "دستورات: /status /demo /open /stats /pairs /add /remove /auto_pairs /strategy /help"
+        "دستورات: /status /demo /open /stats /pairs /add /remove /auto_pairs /strategy /set /enable /disable /reset_strategy /help"
     )
 
 
@@ -136,7 +136,7 @@ async def pairs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     lines.extend(runtime.selected_symbols or ["فعلاً هیچ ارزی واجد شرایط OB نیست."])
     lines.extend(["", "فهرست دستی:"])
     lines.extend(manual or ["موردی اضافه نشده است."])
-    text = "\\n".join(lines)
+    text = "\n".join(lines)
     for start in range(0, len(text), 3800):
         await update.effective_message.reply_text(text[start:start + 3800])
 
@@ -198,7 +198,7 @@ async def auto_pairs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if await _authorized(update, context):
         await update.effective_message.reply_text(
             f"انتخاب خودکار: فعال\nنمادهای واجد شرایط فعلی: {len(runtime.selected_symbols)}\n"
-            f"افزوده‌شده دستی: {len(runtime.manual_symbols)}\\n"
+            f"افزوده‌شده دستی: {len(runtime.manual_symbols)}\n"
             "اسکنر فقط ارزهای دارای اردربلاک معتبر را نگه می‌دارد."
         )
 
@@ -207,9 +207,9 @@ async def strategy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await _authorized(update, context):
         await update.effective_message.reply_text(
             _strategy_text()
-            + "\\n\\nبرای تغییر: /enable sma200 یا /disable sma200"
-            + "\\nبرای عددها: /set pivot4 4"
-            + "\\nبازنشانی: /reset_strategy"
+            + "\n\nبرای تغییر: /enable sma200 یا /disable sma200"
+            + "\nبرای عددها: /set pivot4 4"
+            + "\nبازنشانی: /reset_strategy"
         )
 
 
@@ -240,7 +240,7 @@ async def set_strategy_value(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     if len(context.args) != 2:
         await update.effective_message.reply_text(
-            "فرمت: /set نام_تنظیم مقدار\\nمثال: /set pivot4 4\\n"
+            "فرمت: /set نام_تنظیم مقدار\nمثال: /set pivot4 4\n"
             "برای روشن/خاموش کردن از /enable و /disable استفاده کن."
         )
         return
