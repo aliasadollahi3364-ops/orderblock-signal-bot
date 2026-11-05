@@ -54,6 +54,12 @@ class SQLiteStore:
                 )
             """)
             db.execute("""
+                CREATE TABLE IF NOT EXISTS scanner_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+            """)
+            db.execute("""
                 CREATE TABLE IF NOT EXISTS demo_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     payload TEXT NOT NULL
@@ -95,6 +101,19 @@ class SQLiteStore:
                 "INSERT INTO demo_events(payload) VALUES (?)",
                 [(json.dumps(event, separators=(",", ":"), default=str),) for event in events],
             )
+
+    def save_manual_symbols(self, symbols: list[str]) -> None:
+        with self._connect() as db:
+            db.execute(
+                "INSERT INTO scanner_settings(key, value) VALUES ('manual_symbols', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (json.dumps(sorted(set(symbols))),),
+            )
+
+    def load_manual_symbols(self) -> list[str]:
+        with self._connect() as db:
+            row = db.execute("SELECT value FROM scanner_settings WHERE key='manual_symbols'").fetchone()
+            return json.loads(row["value"]) if row else []
 
     def load_state(self, default_account: DemoAccount) -> tuple[DemoAccount, list[dict[str, Any]]]:
         with self._connect() as db:
