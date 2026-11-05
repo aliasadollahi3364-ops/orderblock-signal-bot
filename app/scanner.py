@@ -207,10 +207,12 @@ class AutomaticScanner:
             time.sleep(max(1, interval_seconds - (time.monotonic() - started)))
 
 
-def open_demo_from_signal(signal: Signal) -> None:
+def open_demo_from_signal(signal: Signal):
     """Open a single fixed-size internal demo position; never touches exchange orders."""
     side = Side.LONG if signal.side == "BUY" else Side.SHORT
     try:
-        runtime.account.open_position(signal.symbol, side, signal.entry, signal.stop)
+        position = runtime.account.open_position(signal.symbol, side, signal.entry, signal.stop)
+        return position
     except ValueError as exc:
         log.info("Demo entry skipped for %s: %s", signal.symbol, exc)
+        return None
