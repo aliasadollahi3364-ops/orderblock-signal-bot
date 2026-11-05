@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from datetime import datetime, timezone
 from typing import Optional
 
 
@@ -28,6 +29,7 @@ class DemoPosition:
     tp3_done: bool = False
     closed: bool = False
     realized_pnl: float = 0.0
+    opened_at: str | None = None
 
     @property
     def risk_distance(self) -> float:
@@ -73,7 +75,7 @@ class DemoAccount:
         assert self.balance is not None
         return max(0.0, self.balance - self.margin_used)
 
-    def open_position(self, symbol: str, side: Side, entry: float, stop: float) -> DemoPosition:
+    def open_position(self, symbol: str, side: Side, entry: float, stop: float, opened_at: str | None = None) -> DemoPosition:
         if symbol in self.positions and not self.positions[symbol].closed:
             raise ValueError(f"An open demo position already exists for {symbol}.")
         if entry <= 0 or stop <= 0:
@@ -96,7 +98,7 @@ class DemoAccount:
         position = DemoPosition(
             symbol=symbol, side=side, entry=entry, stop=stop, initial_stop=stop,
             quantity_initial=qty, quantity_remaining=qty,
-            tp1=targets[0], tp2=targets[1], tp3=targets[2],
+            tp1=targets[0], tp2=targets[1], tp3=targets[2], opened_at=opened_at or datetime.now(timezone.utc).isoformat(),
         )
         self.positions[symbol] = position
         return position
