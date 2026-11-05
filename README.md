@@ -31,13 +31,16 @@ The agreed demo position management is:
 - After TP2, move stop loss to TP1.
 - Record realized and unrealized P&L and publish trade events to Telegram and the web panel.
 
-## Planned components
+## Implemented foundation
 
-- Python strategy and market-data engine.
-- Internal demo account and position ledger.
-- Telegram notifications and commands.
-- Web dashboard for demo balance, open positions, history, and settings.
-- Automated tests for strategy conditions and trade accounting.
+- Closed-candle Python engine for confirmed 4H BOS / Order Block creation and invalidation.
+- 15m pivot, ATR, OB touch/freshness, CHoCH, retest, confirmation-candle, optional SMA200 and optional 4H trend-filter logic.
+- Public-only CCXT market-data adapter for active linear USDT perpetual markets.
+- Internal demo ledger with $100 starting balance, $5 margin, 5x leverage, 1R/2R/3R partial targets, and stop movement after TP1/TP2.
+- Initial unit tests for OB creation/invalidation and demo position accounting.
+- Validated environment settings with a hard guard against enabling live trading.
+
+The Telegram bot, persistent database, full market scanner orchestration, web dashboard, and HOKAS deployment are still pending. The current market-data adapter has not yet been verified against live WEEX responses, and the strategy tests have not yet been run in a deployment environment.
 
 ## Configuration
 
@@ -45,4 +48,4 @@ Copy `.env.example` to `.env` and fill in the required credentials. Never commit
 
 ## Status
 
-Repository initialized. The strategy engine and execution simulator are not yet implemented; implementation is intentionally blocked until the complete source Pine Script is available for a faithful translation.
+The first strategy and demo-account implementation has been committed. It still requires test execution, comparison against TradingView candle-by-candle, WEEX market-data verification, Telegram/web integration, and deployment. No live trading functionality is implemented.
