@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from telegram import Update
-from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes
+from telegram import ReplyKeyboardMarkup, Update
+from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 from app.runtime import runtime
 from app.strategy import StrategyConfig
@@ -326,9 +326,10 @@ def build_telegram_application(token: str, allowed_chat_id: str) -> Application:
     application = ApplicationBuilder().token(token).build()
     application.bot_data["allowed_chat_id"] = allowed_chat_id
     for command, callback in (
-        ("start", start), ("status", status), ("demo", demo),
+        ("start", start), ("menu", menu), ("status", status), ("demo", demo),
         ("open", open_positions), ("pairs", pairs), ("add", add_pair), ("remove", remove_pair), ("auto_pairs", auto_pairs), ("stats", stats), ("strategy", strategy),
         ("set", set_strategy_value), ("enable", enable_strategy), ("disable", disable_strategy), ("reset_strategy", reset_strategy), ("help", help_command),
     ):
         application.add_handler(CommandHandler(command, callback))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_router))
     return application
