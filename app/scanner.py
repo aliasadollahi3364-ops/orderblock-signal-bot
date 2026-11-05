@@ -6,6 +6,7 @@ account data, and never submits orders.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -31,14 +32,31 @@ class ScanSummary:
 
 
 def _to_candles(rows: list[list[float]]) -> list[Candle]:
+    """Convert exchange OHLCV rows, ignoring malformed or invalid candles.
+
+    Some WEEX markets can return zero, non-finite, or internally inconsistent
+    OHLC values. One bad row must not abort screening for an entire symbol.
+    """
     result = []
     for row in rows:
         if len(row) < 6:
             continue
-        result.append(Candle(
-            timestamp=int(row[0]), open=float(row[1]), high=float(row[2]),
-            low=float(row[3]), close=float(row[4]), volume=float(row[5]),
-        ))
+        try:
+            timestamp = int(row[0])
+            open_price, high, low, close, volume = map(float, row[1:6])
+            values = (open_price, high, low, close, volume)
+            if not all(math.isfinite(value) for value in values):
+                continue
+            if min(open_price, high, low, close) <= 0 or volume < 0:
+                continue
+            if high < max(open_price, close, low) or low > min(open_price, close, high):
+                continue
+            result.append(Candle(
+                timestamp=timestamp, open=open_price, high=high,
+                low=low, close=close, volume=volume,
+            ))
+        except (TypeError, ValueError, OverflowError):
+            continue
     return sorted({bar.timestamp: bar for bar in result}.values(), key=lambda bar: bar.timestamp)
 
 
