@@ -166,9 +166,10 @@ class AutomaticScanner:
                 bars = _to_candles(rows)
                 if not bars:
                     continue
-                bar = bars[-1]
                 now_ms = int(time.time() * 1000)
-                if bar.timestamp + MS_15M > now_ms:
+                bar = next((item for item in reversed(bars)
+                            if item.timestamp + MS_15M <= now_ms), None)
+                if bar is None:
                     continue
                 if self._last_demo_bar.get(position.symbol) == bar.timestamp:
                     continue
