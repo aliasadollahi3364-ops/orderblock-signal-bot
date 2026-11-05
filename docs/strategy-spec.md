@@ -20,7 +20,7 @@ This document records the exact source strategy supplied by the project owner on
 - Pivot left/right: 3
 - Body moving average length: 10
 - Opposite-candle search: 12 bars
-- Stored OB maximum: 200
+- Declared `maxStoredOB=200` input; the supplied Pine source does not actually trim the OB arrays with it, so the Python engine preserves all zones rather than silently dropping active ones.
 - A BOS occurs when the 4H close crosses the last confirmed pivot high/low.
 - A qualifying BOS candle body must exceed the prior value of the 10-candle average body.
 - Bullish OB: nearest prior bearish candle; zone is its high/low.
