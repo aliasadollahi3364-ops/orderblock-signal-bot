@@ -68,7 +68,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await update.effective_message.reply_text(
         "ربات سیگنال اردربلاک آماده است. این نسخه فقط حساب دمو دارد.\n"
-        "دستورات: /status /demo /open /stats /strategy /help"
+        "دستورات: /status /demo /open /stats /pairs /add /remove /auto_pairs /strategy /help"
     )
 
 
@@ -197,7 +197,7 @@ def _resolve_symbol(requested: str):
 async def auto_pairs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await _authorized(update, context):
         await update.effective_message.reply_text(
-            f"انتخاب خودکار: فعال\\nنمادهای واجد شرایط فعلی: {len(runtime.selected_symbols)}\\n"
+            f"انتخاب خودکار: فعال\nنمادهای واجد شرایط فعلی: {len(runtime.selected_symbols)}\n"
             f"افزوده‌شده دستی: {len(runtime.manual_symbols)}\\n"
             "اسکنر فقط ارزهای دارای اردربلاک معتبر را نگه می‌دارد."
         )
@@ -213,7 +213,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     await update.effective_message.reply_text(
         "/start - شروع\n/status - وضعیت ربات\n/demo - موجودی دمو\n"
-        "/open - معاملات باز\n/stats - آمار حساب\n/strategy - تنظیمات استراتژی\n/help - راهنما"
+        "/open - معاملات باز\n/pairs - فهرست ارزها\n/add BTC - افزودن ارز دستی\n/remove BTC - حذف ارز دستی\n/auto_pairs - وضعیت انتخاب خودکار\n/stats - آمار حساب\n/strategy - تنظیمات استراتژی\n/help - راهنما"
     )
 
 
