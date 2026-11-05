@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     demo_initial_balance: float = Field(default=100.0, gt=0)
     demo_margin_per_trade: float = Field(default=5.0, gt=0)
     demo_leverage: float = Field(default=5.0, gt=0)
+    database_path: str = "./data/demo.sqlite3"
     live_trading_enabled: bool = False
     host: str = "0.0.0.0"
     port: int = Field(default=8000, ge=1, le=65535)
