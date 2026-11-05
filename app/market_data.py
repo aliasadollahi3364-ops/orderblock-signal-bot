@@ -83,6 +83,21 @@ class WeexMarketData:
         candidates.sort(key=lambda item: item.rank_score, reverse=True)
         return candidates[:limit]
 
+    def resolve_manual_symbol(self, requested: str) -> MarketCandidate:
+        """Validate and resolve an explicitly requested active linear USDT swap."""
+        markets = self.load_markets()
+        normalized = requested.strip().upper().replace("-", "/")
+        if not normalized.endswith("/USDT"):
+            normalized += "/USDT"
+        market = markets.get(normalized)
+        if market is None or not market.get("active", True) or not market.get("swap") or not market.get("linear") or (market.get("quote") or "").upper() != self.quote_currency:
+            raise ValueError(f"نماد {normalized} در بازارهای فعال قرارداد دائمی USDT صرافی WEEX پیدا نشد.")
+        ticker = self._fetch_tickers_cached().get(normalized) or {}
+        last = float(ticker.get("last") or 0) or None
+        volume = float(ticker.get("quoteVolume") or 0)
+        spread, score = _ticker_score(volume, float(ticker["bid"]) if ticker.get("bid") else None, float(ticker["ask"]) if ticker.get("ask") else None)
+        return MarketCandidate(normalized, volume, spread, score, last)
+
     def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int = 300) -> list[list[float]]:
         if limit < 1:
             raise ValueError("limit must be positive")
