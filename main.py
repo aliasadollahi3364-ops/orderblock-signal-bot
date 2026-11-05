@@ -40,6 +40,8 @@ async def run_telegram(token: str, chat_id: str) -> None:
 async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> None:
     market_data = WeexMarketData(settings.exchange_id, settings.quote_currency)
     bot = Bot(token=settings.telegram_bot_token) if settings.telegram_bot_token and settings.telegram_chat_id else None
+    if bot is not None:
+        await bot.initialize()
 
     def send(text: str) -> None:
         if bot is not None:
@@ -83,6 +85,8 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
         await asyncio.to_thread(scanner.run_forever, settings.scan_interval_seconds)
     finally:
         market_data.close()
+        if bot is not None:
+            await bot.shutdown()
 
 
 async def main() -> None:
