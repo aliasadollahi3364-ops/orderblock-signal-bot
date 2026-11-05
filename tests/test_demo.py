@@ -85,7 +85,9 @@ def test_sqlite_restores_closed_position_and_account_configuration(tmp_path):
     store = SQLiteStore(path)
     account = DemoAccount(initial_balance=250, margin_per_trade=10, leverage=3, fee_rate=0)
     position = account.open_position("ETH/USDT", Side.SHORT, 100, 102)
-    account.process_candle(high=100, low=94, symbol="ETH/USDT")
+    account.process_candle(high=99.5, low=98.5, symbol="ETH/USDT")
+    account.process_candle(high=97.5, low=96.5, symbol="ETH/USDT")
+    account.process_candle(high=95, low=94, symbol="ETH/USDT")
     store.save_state(account, [{"symbol": "ETH/USDT", "type": "TP3", "price": 94}])
 
     restored, events = store.load_state(DemoAccount())
