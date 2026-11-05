@@ -207,8 +207,8 @@ class OrderBlockStrategy:
                         break
 
         self.order_blocks.extend(created)
-        if len(self.order_blocks) > cfg.max_stored_ob:
-            self.order_blocks = self.order_blocks[-cfg.max_stored_ob:]
+        # maxStoredOB exists as a Pine input but is not applied to the source arrays;
+        # preserve that behavior rather than silently dropping still-active zones.
         self._body_values.append(body)
         self._last_4h_timestamp = candle.timestamp
         return created
