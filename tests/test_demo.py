@@ -39,3 +39,22 @@ def test_short_targets_are_below_entry():
     assert position.tp1 == pytest.approx(98.0)
     assert position.tp2 == pytest.approx(96.0)
     assert position.tp3 == pytest.approx(94.0)
+
+
+def test_multiple_demo_positions_reserve_fixed_margin_each():
+    account = DemoAccount(fee_rate=0)
+    account.open_position("BTC/USDT", Side.LONG, 100.0, 98.0)
+    account.open_position("ETH/USDT", Side.SHORT, 50.0, 51.0)
+    assert len(account.open_positions) == 2
+    assert account.margin_used == pytest.approx(10.0)
+    assert account.free_margin == pytest.approx(90.0)
+
+
+def test_multiple_positions_require_symbol_when_processing_candle():
+    account = DemoAccount(fee_rate=0)
+    account.open_position("BTC/USDT", Side.LONG, 100.0, 98.0)
+    account.open_position("ETH/USDT", Side.SHORT, 50.0, 51.0)
+    with pytest.raises(ValueError):
+        account.process_candle(high=101.0, low=99.0)
+    events = account.process_candle(high=102.0, low=101.0, symbol="BTC/USDT")
+    assert [event["type"] for event in events] == ["TP1"]
