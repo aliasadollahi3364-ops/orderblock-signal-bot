@@ -176,8 +176,9 @@ class OrderBlockStrategy:
                 self.last_pl4 = bars[candidate].low
 
         body = abs(candle.close - candle.open)
-        prior_average = (sum(list(self._body_values)[-(cfg.body_len-1):]) /
-                         (cfg.body_len-1)) if len(self._body_values) >= cfg.body_len-1 else None
+        # Pine avgBody[1] is the SMA of the previous body_len completed bars.
+        prior_average = (sum(self._body_values) / cfg.body_len
+                         if len(self._body_values) == cfg.body_len else None)
         strong = prior_average is not None and body > prior_average
         bull_bos = (self.last_ph4 is not None and previous_close is not None and
                     candle.close > self.last_ph4 and previous_close <= self.last_ph4)
