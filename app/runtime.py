@@ -15,6 +15,7 @@ class BotRuntime:
     scanner_state: str = "NOT_STARTED"
     last_scan_at: datetime | None = None
     selected_symbols: list[str] = field(default_factory=list)
+    manual_symbols: list[str] = field(default_factory=list)
     signal_count: int = 0
     closed_trade_events: list[dict[str, Any]] = field(default_factory=list)
     storage: Any = None
