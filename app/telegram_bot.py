@@ -63,12 +63,48 @@ def _strategy_text() -> str:
     return "\n".join(lines)
 
 
+MAIN_MENU = ReplyKeyboardMarkup(
+    [
+        ["/status", "/demo"],
+        ["/open", "/stats"],
+        ["مدیریت ارزها", "تنظیمات استراتژی"],
+        ["/help", "/menu"],
+    ],
+    resize_keyboard=True,
+    is_persistent=True,
+    input_field_placeholder="یک بخش را انتخاب کن...",
+)
+
+
+async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    await update.effective_message.reply_text(
+        "🏠 منوی اصلی ربات\nبرای افزودن ارز: /add BTC | برای حذف: /remove BTC",
+        reply_markup=MAIN_MENU,
+    )
+
+
+async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    text = (update.effective_message.text or "").strip()
+    if text == "مدیریت ارزها":
+        answer = "🪙 مدیریت ارزها\n/pairs فهرست ارزها\n/auto_pairs وضعیت انتخاب خودکار\n/add BTC افزودن ارز\n/remove BTC حذف ارز دستی"
+    elif text == "تنظیمات استراتژی":
+        answer = "⚙️ تنظیمات استراتژی\n/strategy نمایش همه تنظیمات\n/enable trend روشن کردن فیلتر روند\n/disable trend خاموش کردن فیلتر روند\n/set pivot4 4 تغییر مقدار عددی\n/reset_strategy بازنشانی تنظیمات"
+    else:
+        answer = "برای استفاده از منو، یکی از دکمه‌ها را انتخاب کن یا /menu را بفرست."
+    await update.effective_message.reply_text(answer, reply_markup=MAIN_MENU)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized(update, context):
         return
     await update.effective_message.reply_text(
         "ربات سیگنال اردربلاک آماده است. این نسخه فقط حساب دمو دارد.\n"
-        "دستورات: /status /demo /open /stats /pairs /add /remove /auto_pairs /strategy /set /enable /disable /reset_strategy /help"
+        "از دکمه‌های پایین برای دسترسی به بخش‌ها استفاده کن.",
+        reply_markup=MAIN_MENU,
     )
 
 
