@@ -101,7 +101,7 @@ async def open_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     for p in positions:
         lines.append(
             f"{p.symbol} | {p.side.value}\n"
-            f"ورود: {p.entry:g} | استاپ فعلی: {p.stop:g}\n"
+            f"ورود: {p.entry:g} | زمان ورود: {p.opened_at or 'نامشخص'}\nاستاپ فعلی: {p.stop:g}\n"
             f"TP1: {p.tp1:g} | TP2: {p.tp2:g} | TP3: {p.tp3:g}"
         )
     await update.effective_message.reply_text("\n\n".join(lines))
