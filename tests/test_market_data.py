@@ -11,3 +11,45 @@ def test_ticker_score_rewards_tight_spread_without_changing_volume_basis():
 def test_market_candidate_retains_ticker_last_price():
     candidate = MarketCandidate("BTC/USDT:USDT", 1000, 0.05, 1050, 65000)
     assert candidate.last_price == 65000
+
+def _market_data_for_manual_symbol(monkeypatch):
+    from app.market_data import WeexMarketData
+
+    instance = WeexMarketData.__new__(WeexMarketData)
+    instance.quote_currency = "USDT"
+    instance._markets = {
+        "SPCX/USDT:USDT": {
+            "symbol": "SPCX/USDT:USDT",
+            "base": "SPCX",
+            "quote": "USDT",
+            "settle": "USDT",
+            "active": True,
+            "swap": True,
+            "linear": True,
+        }
+    }
+    monkeypatch.setattr(instance, "_fetch_tickers_cached", lambda: {
+        "SPCX/USDT:USDT": {"last": 1.25, "quoteVolume": 50000}
+    })
+    return instance
+
+
+import pytest
+
+
+@pytest.mark.parametrize("requested", ["SPCX", "SPCXUSDT", "SPCX/USDT", "SPCX/USDT:USDT"])
+def test_manual_symbol_resolves_ccxt_settled_swap_symbol(monkeypatch, requested):
+    from app.market_data import MarketCandidate
+
+    instance = _market_data_for_manual_symbol(monkeypatch)
+    candidate = instance.resolve_manual_symbol(requested)
+    assert isinstance(candidate, MarketCandidate)
+    assert candidate.symbol == "SPCX/USDT:USDT"
+    assert candidate.last_price == 1.25
+
+
+def test_manual_symbol_rejects_inactive_or_non_swap_market(monkeypatch):
+    instance = _market_data_for_manual_symbol(monkeypatch)
+    instance._markets["SPCX/USDT:USDT"]["active"] = False
+    with pytest.raises(ValueError, match="قرارداد دائمی"):
+        instance.resolve_manual_symbol("SPCX")
