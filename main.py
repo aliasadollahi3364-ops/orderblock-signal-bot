@@ -46,6 +46,22 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
         if bot is not None:
             future = asyncio.run_coroutine_threadsafe(bot.send_message(chat_id=settings.telegram_chat_id, text=text), loop)
             future.add_done_callback(lambda result: logger.error("Telegram notification failed: %s", result.exception()) if result.exception() else None)
+    async def send_temporary_notification(text: str) -> None:
+        """Send non-signal trade notifications and remove them after the shared TTL."""
+        if bot is None:
+            return
+        try:
+            message = await bot.send_message(chat_id=settings.telegram_chat_id, text=text)
+            async def delete_notification() -> None:
+                await asyncio.sleep(120)
+                try:
+                    await bot.delete_message(chat_id=message.chat_id, message_id=message.message_id)
+                except Exception:
+                    logger.exception("Could not delete temporary Telegram notification %s", message.message_id)
+            asyncio.create_task(delete_notification())
+        except Exception:
+            logger.exception("Could not send temporary Telegram notification")
+
     async def send_signal_photo(signal: Signal, position) -> None:
         if bot is None: return
         try:
@@ -81,7 +97,11 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
             if bot is not None:
                 asyncio.run_coroutine_threadsafe(send_signal_photo(signal, position), loop)
     def handle_trade_event(event: dict) -> None:
-        send(f"🔔 رویداد معامله دمو | {event['symbol']}\nوضعیت: {event['type']}\nقیمت خروج/رویداد: {event['price']:g}\nزمان خروج/رویداد: {event['time']}\nسود/زیان تحقق‌یافته: {event['realized_pnl']:+.4f} USDT\nمعاملات واقعی: خاموش")
+        if bot is not None:
+            text = (f"🔔 رویداد معامله دمو | {event['symbol']}\nوضعیت: {event['type']}\n"
+                    f"قیمت خروج/رویداد: {event['price']:g}\nزمان خروج/رویداد: {event['time']}\n"
+                    f"سود/زیان تحقق‌یافته: {event['realized_pnl']:+.4f} USDT\nمعاملات واقعی: خاموش")
+            asyncio.run_coroutine_threadsafe(send_temporary_notification(text), loop)
     scanner = AutomaticScanner(market_data=market_data, strategy_config=runtime.strategy_config,
         universe_limit=settings.scanner_universe_limit, candidate_limit=settings.scanner_candidate_limit,
         on_signal=handle_signal, on_trade_event=handle_trade_event)
