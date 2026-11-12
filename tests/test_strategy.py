@@ -135,3 +135,32 @@ def test_legacy_saved_strategy_settings_reset_to_current_pine_defaults(tmp_path)
     assert cfg.use_sma200_filter is True
     assert cfg.enable_trendline_signals is True
     assert cfg.use_trend_filter is True
+
+
+
+def test_trendline_break_emits_distinct_trendline_signal_method():
+    from app.strategy import OrderBlock
+
+    cfg = StrategyConfig(
+        atr_len=1,
+        use_trend_filter=False,
+        use_sma200_filter=False,
+        enable_trendline_signals=True,
+        use_sma200_trendline_filter=False,
+        require_trendline_pullback=False,
+    )
+    engine = OrderBlockStrategy("BTC/USDT", cfg)
+    engine.candles15.append(bar(1, 104.0, 105.0, 103.0, 104.0))
+    engine._last_15m_timestamp = 1
+    engine._tr15.append(2.0)
+    engine.prev_ph15, engine.prev_ph15_bar = 110.0, -1
+    engine.last_ph15, engine.last_ph15_bar = 105.0, 0
+    engine.last_pl15 = 90.0
+    engine.order_blocks.append(OrderBlock(1, 108.0, 100.0, 10))
+
+    signal = engine.on_15m_close(bar(2, 105.0, 107.0, 103.0, 106.0))
+
+    assert signal is not None
+    assert signal.method == "TRENDLINE"
+    assert signal.side == "BUY"
+    assert signal.stop < signal.entry
