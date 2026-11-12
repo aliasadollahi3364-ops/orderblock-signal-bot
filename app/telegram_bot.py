@@ -126,7 +126,7 @@ MAIN_MENU = ReplyKeyboardMarkup(
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized(update, context):
         return
-    await update.effective_message.reply_text(
+    await _reply_temporary(update, context, 
         "🏠 منوی اصلی ربات\nبرای افزودن ارز: /add BTC | برای حذف: /remove BTC",
         reply_markup=MAIN_MENU,
     )
@@ -142,13 +142,13 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         answer = "⚙️ تنظیمات استراتژی\n/strategy نمایش همه تنظیمات\n/enable trend روشن کردن فیلتر روند ۴ساعته OB\n/enable trendline فعال‌کردن سیگنال خط روند\n/disable trendline غیرفعال‌کردن سیگنال خط روند\n/enable trendline_pullback الزام پولبک خط روند\n/set pivot4 4 تغییر مقدار عددی\n/reset_strategy بازنشانی تنظیمات"
     else:
         answer = "برای استفاده از منو، یکی از دکمه‌ها را انتخاب کن یا /menu را بفرست."
-    await update.effective_message.reply_text(answer, reply_markup=MAIN_MENU)
+    await _reply_temporary(update, context, answer, reply_markup=MAIN_MENU)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized(update, context):
         return
-    await update.effective_message.reply_text(
+    await _reply_temporary(update, context, 
         "ربات سیگنال اردربلاک آماده است. این نسخه فقط حساب دمو دارد.\n"
         "از دکمه‌های پایین برای دسترسی به بخش‌ها استفاده کن.",
         reply_markup=MAIN_MENU,
@@ -159,7 +159,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized(update, context):
         return
     last_scan = runtime.last_scan_at.isoformat() if runtime.last_scan_at else "هنوز اجرا نشده"
-    await update.effective_message.reply_text(
+    await _reply_temporary(update, context, 
         f"وضعیت: {runtime.scanner_state}\n"
         f"آخرین اسکن: {last_scan}\n"
         f"تعداد نمادهای انتخاب‌شده: {len(runtime.selected_symbols)}\n"
@@ -170,7 +170,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def demo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await _authorized(update, context):
-        await update.effective_message.reply_text(_account_text())
+        await _reply_temporary(update, context, _account_text())
 
 
 async def open_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -178,7 +178,7 @@ async def open_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     positions = runtime.account.open_positions
     if not positions:
-        await update.effective_message.reply_text("در حال حاضر معامله دمو بازی وجود ندارد.")
+        await _reply_temporary(update, context, "در حال حاضر معامله دمو بازی وجود ندارد.")
         return
     lines = ["معاملات دمو باز:"]
     for p in positions:
@@ -187,7 +187,7 @@ async def open_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             f"ورود: {p.entry:g} | زمان ورود: {p.opened_at or 'نامشخص'}\nاستاپ فعلی: {p.stop:g}\n"
             f"TP1: {p.tp1:g} | TP2: {p.tp2:g} | TP3: {p.tp3:g}"
         )
-    await update.effective_message.reply_text("\n\n".join(lines))
+    await _reply_temporary(update, context, "\n\n".join(lines))
 
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -196,7 +196,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     acct = runtime.account
     realized = sum(p.realized_pnl for p in acct.positions.values())
     closed = sum(1 for p in acct.positions.values() if p.closed)
-    await update.effective_message.reply_text(
+    await _reply_temporary(update, context, 
         f"آمار حساب دمو\nموجودی فعلی: {float(acct.balance or 0):.2f} USDT\n"
         f"سود/زیان ثبت‌شده معاملات: {realized:+.4f} USDT\n"
         f"معاملات بسته‌شده: {closed}\nمعاملات باز: {len(acct.open_positions)}"
@@ -329,14 +329,14 @@ async def pairs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     lines.extend(manual or ["موردی اضافه نشده است."])
     text = "\n".join(lines)
     for start in range(0, len(text), 3800):
-        await update.effective_message.reply_text(text[start:start + 3800])
+        await _reply_temporary(update, context, text[start:start + 3800])
 
 
 async def add_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized(update, context):
         return
     if not context.args:
-        await update.effective_message.reply_text("نماد را وارد کن. مثال: /add BTC یا /add BTC/USDT")
+        await _reply_temporary(update, context, "نماد را وارد کن. مثال: /add BTC یا /add BTC/USDT")
         return
     try:
         candidate = await __import__("asyncio").to_thread(
@@ -344,31 +344,31 @@ async def add_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         symbol = candidate.symbol
         if symbol in runtime.manual_symbols:
-            await update.effective_message.reply_text(f"{symbol} از قبل در فهرست دستی است.")
+            await _reply_temporary(update, context, f"{symbol} از قبل در فهرست دستی است.")
             return
         runtime.manual_symbols.append(symbol)
         if runtime.storage is not None:
             runtime.storage.save_manual_symbols(runtime.manual_symbols)
-        await update.effective_message.reply_text(
+        await _reply_temporary(update, context, 
             f"✅ {symbol} به فهرست دستی اضافه شد. در اسکن بعدی بررسی می‌شود؛ "
             "فقط در صورت داشتن اردربلاک معتبر وارد اسکن ۱۵ دقیقه‌ای خواهد شد."
         )
     except Exception as exc:
-        await update.effective_message.reply_text(f"❌ افزودن ارز انجام نشد: {exc}")
+        await _reply_temporary(update, context, f"❌ افزودن ارز انجام نشد: {exc}")
 
 
 async def remove_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized(update, context):
         return
     if not context.args:
-        await update.effective_message.reply_text("مثال: /remove BTC یا /remove BTC/USDT")
+        await _reply_temporary(update, context, "مثال: /remove BTC یا /remove BTC/USDT")
         return
     requested = " ".join(context.args).strip().upper().replace("-", "/").replace(" ", "")
     if "/" in requested:
         base, quote_part = requested.split("/", 1)
         quote = quote_part.split(":", 1)[0]
         if quote and quote != "USDT":
-            await update.effective_message.reply_text("فقط نمادهای قرارداد USDT را می‌توان حذف کرد.")
+            await _reply_temporary(update, context, "فقط نمادهای قرارداد USDT را می‌توان حذف کرد.")
             return
     else:
         base = requested[:-4] if requested.endswith("USDT") and len(requested) > 4 else requested
@@ -378,14 +378,14 @@ async def remove_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         None,
     )
     if matched is None:
-        await update.effective_message.reply_text(
+        await _reply_temporary(update, context, 
             "این ارز در فهرست دستی نیست. حذف فقط برای ارزهایی انجام می‌شود که خودت اضافه کرده‌ای."
         )
         return
     runtime.manual_symbols.remove(matched)
     if runtime.storage is not None:
         runtime.storage.save_manual_symbols(runtime.manual_symbols)
-    await update.effective_message.reply_text(f"🗑 {matched} از فهرست دستی حذف شد.")
+    await _reply_temporary(update, context, f"🗑 {matched} از فهرست دستی حذف شد.")
 
 
 def _resolve_symbol(requested: str):
@@ -398,7 +398,7 @@ def _resolve_symbol(requested: str):
 
 async def auto_pairs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await _authorized(update, context):
-        await update.effective_message.reply_text(
+        await _reply_temporary(update, context, 
             f"انتخاب خودکار: فعال\nنمادهای واجد شرایط فعلی: {len(runtime.selected_symbols)}\n"
             f"افزوده‌شده دستی: {len(runtime.manual_symbols)}\n"
             "اسکنر فقط ارزهای دارای اردربلاک معتبر را نگه می‌دارد."
@@ -407,7 +407,7 @@ async def auto_pairs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 async def strategy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await _authorized(update, context):
-        await update.effective_message.reply_text(
+        await _reply_temporary(update, context, 
             _strategy_text()
             + "\n\n/enable trendline یا /disable trendline برای فعال/غیرفعال‌کردن مسیر خط روند"
             + "\n/enable trendline_sma برای فیلتر SMA200 خط روند"
@@ -444,7 +444,7 @@ async def set_strategy_value(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not await _authorized(update, context):
         return
     if len(context.args) != 2:
-        await update.effective_message.reply_text(
+        await _reply_temporary(update, context, 
             "فرمت: /set نام_تنظیم مقدار\nمثال: /set pivot4 4\n"
             "برای روشن/خاموش کردن از /enable و /disable استفاده کن."
         )
@@ -452,11 +452,11 @@ async def set_strategy_value(update: Update, context: ContextTypes.DEFAULT_TYPE)
     key = STRATEGY_ALIASES.get(context.args[0].lower(), context.args[0].lower())
     values = asdict(runtime.strategy_config or StrategyConfig())
     if key not in values:
-        await update.effective_message.reply_text("نام تنظیم پیدا نشد. برای دیدن نام‌ها /strategy را بفرست.")
+        await _reply_temporary(update, context, "نام تنظیم پیدا نشد. برای دیدن نام‌ها /strategy را بفرست.")
         return
     current = values[key]
     if isinstance(current, bool):
-        await update.effective_message.reply_text("این گزینه روشن/خاموش است؛ از /enable یا /disable استفاده کن.")
+        await _reply_temporary(update, context, "این گزینه روشن/خاموش است؛ از /enable یا /disable استفاده کن.")
         return
     try:
         value = int(context.args[1]) if isinstance(current, int) else float(context.args[1])
@@ -473,23 +473,23 @@ async def set_strategy_value(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if key == "min_tick" and value <= 0:
             raise ValueError("min_tick باید بیشتر از صفر باشد.")
         _save_strategy_config(updated)
-        await update.effective_message.reply_text(f"✅ {key} روی {value} تنظیم شد و از اسکن بعدی اعمال می‌شود.")
+        await _reply_temporary(update, context, f"✅ {key} روی {value} تنظیم شد و از اسکن بعدی اعمال می‌شود.")
     except (TypeError, ValueError) as exc:
-        await update.effective_message.reply_text(f"❌ مقدار نامعتبر است: {exc}")
+        await _reply_temporary(update, context, f"❌ مقدار نامعتبر است: {exc}")
 
 
 async def toggle_strategy_value(update: Update, context: ContextTypes.DEFAULT_TYPE, enabled: bool) -> None:
     if not await _authorized(update, context):
         return
     if len(context.args) != 1:
-        await update.effective_message.reply_text(
+        await _reply_temporary(update, context, 
             "نام گزینه را وارد کن. مثال: /enable trendline یا /disable trendline_pullback"
         )
         return
     key = STRATEGY_ALIASES.get(context.args[0].lower(), context.args[0].lower())
     values = asdict(runtime.strategy_config or StrategyConfig())
     if key not in values or not isinstance(values[key], bool):
-        await update.effective_message.reply_text(
+        await _reply_temporary(update, context, 
             "گزینه روشن/خاموش پیدا نشد. نام‌های کوتاه: trend, trendline, trendline_sma, trendline_pullback, "
             "ob_touch, choch, retest, confirm_candle, sma200, trailing"
         )
@@ -497,7 +497,7 @@ async def toggle_strategy_value(update: Update, context: ContextTypes.DEFAULT_TY
     values[key] = enabled
     _save_strategy_config(StrategyConfig(**values))
     state = "روشن" if enabled else "خاموش"
-    await update.effective_message.reply_text(f"✅ {key}: {state}؛ از اسکن بعدی اعمال می‌شود.")
+    await _reply_temporary(update, context, f"✅ {key}: {state}؛ از اسکن بعدی اعمال می‌شود.")
 
 
 async def enable_strategy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -513,13 +513,13 @@ async def reset_strategy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     config = StrategyConfig()
     _save_strategy_config(config)
-    await update.effective_message.reply_text("تنظیمات استراتژی به پیش‌فرض کد بازگشت و ذخیره شد.")
+    await _reply_temporary(update, context, "تنظیمات استراتژی به پیش‌فرض کد بازگشت و ذخیره شد.")
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized(update, context):
         return
-    await update.effective_message.reply_text(
+    await _reply_temporary(update, context, 
         "/start - شروع\n/status - وضعیت ربات\n/demo - موجودی دمو\n"
         "/open - معاملات باز\n/panel - پنل حرفه‌ای حساب دمو\n/history - تاریخچه معاملات\n/pairs - فهرست ارزها\n/add BTC - افزودن ارز دستی\n"
         "/remove BTC - حذف ارز دستی\n/auto_pairs - وضعیت انتخاب خودکار\n/stats - آمار حساب\n"
