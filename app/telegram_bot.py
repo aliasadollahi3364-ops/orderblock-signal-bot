@@ -13,7 +13,10 @@ from app.runtime import runtime
 from app.strategy import StrategyConfig
 
 import asyncio
+import logging
 from telegram.error import TelegramError
+
+logger = logging.getLogger(__name__)
 
 TEMP_MESSAGE_TTL_SECONDS = 120
 
@@ -23,7 +26,7 @@ async def _delete_later(bot, chat_id: int, message_id: int) -> None:
     try:
         await bot.delete_message(chat_id=chat_id, message_id=message_id)
     except TelegramError:
-        pass
+        logger.exception("Could not delete temporary Telegram message %s in chat %s", message_id, chat_id)
 
 
 async def _reply_temporary(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, **kwargs):
