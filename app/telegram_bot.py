@@ -92,7 +92,7 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if text == "مدیریت ارزها":
         answer = "🪙 مدیریت ارزها\n/pairs فهرست ارزها\n/auto_pairs وضعیت انتخاب خودکار\n/add BTC افزودن ارز\n/remove BTC حذف ارز دستی"
     elif text == "تنظیمات استراتژی":
-        answer = "⚙️ تنظیمات استراتژی\n/strategy نمایش همه تنظیمات\n/enable trend روشن کردن فیلتر روند\n/disable trend خاموش کردن فیلتر روند\n/set pivot4 4 تغییر مقدار عددی\n/reset_strategy بازنشانی تنظیمات"
+        answer = "⚙️ تنظیمات استراتژی\n/strategy نمایش همه تنظیمات\n/enable trend روشن کردن فیلتر روند ۴ساعته OB\n/enable trendline فعال‌کردن سیگنال خط روند\n/disable trendline غیرفعال‌کردن سیگنال خط روند\n/enable trendline_pullback الزام پولبک خط روند\n/set pivot4 4 تغییر مقدار عددی\n/reset_strategy بازنشانی تنظیمات"
     else:
         answer = "برای استفاده از منو، یکی از دکمه‌ها را انتخاب کن یا /menu را بفرست."
     await update.effective_message.reply_text(answer, reply_markup=MAIN_MENU)
@@ -260,7 +260,6 @@ STRATEGY_ALIASES = {
     "confirm_strength": "use_confirm_strength",
     "ob_boundary_sl": "use_ob_boundary_sl",
     "sma200": "use_sma200_filter",
-    "break_even": "use_break_even",
     "trailing": "use_trailing_stop",
 }
 

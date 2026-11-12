@@ -6,7 +6,7 @@ def bar(ts, o, h, l, c):
 
 
 def test_confirmed_bullish_bos_creates_nearest_prior_bearish_order_block():
-    cfg = StrategyConfig(pivot4=1, body_len=2, ob_search=3)
+    cfg = StrategyConfig(pivot4=1, body_len=2, ob_search=3, ob_atr_len=1)
     engine = OrderBlockStrategy("BTC/USDT", cfg)
 
     engine.on_4h_close(bar(1, 10, 11, 8, 9))       # bearish OB candidate
@@ -23,7 +23,7 @@ def test_confirmed_bullish_bos_creates_nearest_prior_bearish_order_block():
 
 
 def test_bullish_ob_invalidates_only_on_confirmed_4h_close_below_bottom():
-    cfg = StrategyConfig(pivot4=1, body_len=2, ob_search=3)
+    cfg = StrategyConfig(pivot4=1, body_len=2, ob_search=3, ob_atr_len=1)
     engine = OrderBlockStrategy("BTC/USDT", cfg)
     engine.on_4h_close(bar(1, 10, 11, 8, 9))
     engine.on_4h_close(bar(2, 9, 12, 8.5, 10))
@@ -59,6 +59,8 @@ def test_15m_touch_and_confirmation_emit_buy_with_ob_boundary_stop():
         use_confirm_candle=True,
         use_confirm_strength=False,
         use_ob_boundary_sl=True,
+        use_trend_filter=False,
+        use_sma200_filter=False,
         min_tick=0.001,
     )
     engine = OrderBlockStrategy("BTC/USDT", cfg)
@@ -73,3 +75,42 @@ def test_15m_touch_and_confirmation_emit_buy_with_ob_boundary_stop():
     assert signal.entry == 101.0
     assert signal.stop < 98.0
     assert ob.used
+
+
+
+def test_new_pine_defaults_match_supplied_source():
+    cfg = StrategyConfig()
+    assert cfg.use_trend_filter is True
+    assert cfg.ob_atr_len == 14
+    assert cfg.min_bos_body_atr == 0.65
+    assert cfg.min_bos_body_avg == 1.20
+    assert cfg.min_break_atr == 0.10
+    assert cfg.max_ob_candle_range_atr == 2.50
+    assert cfg.risk_reward == 2.5
+    assert cfg.sl_buffer_atr == 2.0
+    assert cfg.enable_trendline_signals is True
+    assert cfg.require_trendline_pullback is True
+    assert cfg.use_sma200_filter is True
+    assert cfg.use_sma200_trendline_filter is True
+    assert cfg.use_trailing_stop is False
+
+
+def test_nearest_touched_ob_direction_includes_used_but_not_inactive_zones():
+    from app.strategy import OrderBlock
+
+    engine = OrderBlockStrategy("BTC/USDT")
+    engine.order_blocks.extend([
+        OrderBlock(1, 105.0, 100.0, 1, used=True),
+        OrderBlock(-1, 112.0, 109.0, 2),
+        OrderBlock(1, 104.0, 101.0, 3, active=False),
+    ])
+    candle = bar(100, 108.0, 110.0, 103.0, 108.5)
+    assert engine._nearest_touched_ob_direction(candle) == -1
+
+
+def test_trendline_signal_configuration_is_independent_from_ob_trend_filter():
+    cfg = StrategyConfig(use_trend_filter=False, enable_trendline_signals=True,
+                         use_sma200_trendline_filter=True)
+    assert cfg.enable_trendline_signals
+    assert not cfg.use_trend_filter
+    assert cfg.use_sma200_trendline_filter

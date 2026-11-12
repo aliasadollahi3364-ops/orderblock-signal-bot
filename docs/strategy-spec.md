@@ -1,81 +1,16 @@
 # Strategy implementation specification
 
-This document records the exact source strategy supplied by the project owner on 2026-11-05. The full Pine Script source was supplied in the conversation under the title:
+Source of truth: user-supplied Pine Script v6, titled WEEX 4H Order Blocks + 15m Trendline Break + SMA200 + Trailing Stop.
 
-`WEEX | Order Blocks + CHoCH + SMA200 Filter + Trailing Stop` (Pine Script v6).
-
-## Source-of-truth rules
-
-1. Implement the main chart strategy (the 4H Order Block engine and 15m entry logic), not the small 10-symbol table scanner at the bottom of the Pine file.
-2. Do not merge older strategies or introduce unrequested filters.
-3. Use only closed 4H candles for confirmed HTF events.
-4. Signal evaluation is on closed 15m candles.
-5. FVG is visual only and has no role in signal generation.
-6. The Pine source's risk sizing and single 2R exit are not used for the internal demo account sizing/partial exits described below. The signal's initial stop is derived from the Pine logic.
-
-## Defaults supplied in Pine
-
-### 4H Order Blocks
-- HTF: 240 minutes
-- Pivot left/right: 3
-- Body moving average length: 10
-- Opposite-candle search: 12 bars
-- Declared `maxStoredOB=200` input; the supplied Pine source does not actually trim the OB arrays with it, so the Python engine preserves all zones rather than silently dropping active ones.
-- A BOS occurs when the 4H close crosses the last confirmed pivot high/low.
-- A qualifying BOS candle body must exceed the prior value of the 10-candle average body.
-- Bullish OB: nearest prior bearish candle; zone is its high/low.
-- Bearish OB: nearest prior bullish candle; zone is its high/low.
-- Confirmed HTF values are requested with the prior HTF bar to avoid lookahead.
-- Bullish OB invalidates only on a confirmed 4H close below its bottom; bearish OB invalidates only on a confirmed 4H close above its top.
-
-### 15m entry
-- Pivot length: 3
-- CHoCH wait limit: 17 bars
-- ATR length: 7
-- 4H BOS trend filter: OFF
-- OB touch required: ON
-- Touch freshness: ON, maximum 14 bars since touch
-- CHoCH required: ON
-- CHoCH strength filter: ON; minimum body 0.85 ATR
-- CHoCH retest required: ON; tolerance 0.15 ATR
-- Directional confirmation candle required: ON
-- Confirmation strength filter: ON; minimum body 0.20 ATR
-- Long confirmation: bullish candle; when retest filter is enabled, close must be above retest level.
-- Short confirmation: bearish candle; when retest filter is enabled, close must be below retest level.
-- Only an active, unused, directionally eligible OB may generate an entry.
-- The first qualifying OB in stored-array order is selected, matching the Pine loop's break behavior.
-
-### Initial stop
-- OB-boundary stop: ON
-- Buffer: 0.15 ATR
-- Long stop: min(last confirmed 15m pivot low, OB bottom) minus ATR buffer.
-- Short stop: max(last confirmed 15m pivot high, OB top) plus ATR buffer.
-- Stop must be on the correct side of the signal close and at least one minimum tick away.
-
-### Optional filters and defaults
-- SMA length: 200
-- SMA display: OFF
-- SMA entry filter: OFF (if enabled, longs require close above SMA200 and shorts below)
-- 4H BOS trend alignment filter: OFF
-- FVG display: ON by default, visual only
-- Pine trailing stop: OFF by default. If enabled, the source uses a fixed distance equal to initial entry-to-stop risk distance, not an ATR-multiple distance, and only ratchets in the profitable direction.
-- Break-even: ON; trigger default 1.0R.
-
-## Demo account behavior separately agreed for this bot
-
-- Starting balance: $100
-- Fixed margin per position: $5
-- Leverage: 5x
-- Notional position value: $25
-- No live trading and no live order endpoints.
-- Three partial targets: TP1=1R close 33%; TP2=2R close 33%; TP3=3R close remaining 34%.
-- After TP1, move stop to entry.
-- After TP2, move stop to TP1.
-- Track realized/unrealized P&L and all trade events.
-
-## Important implementation details to validate
-
-- Pine's `strategy.position_size`, `syminfo.pointvalue`, tick size, contract quantity, and fee/slippage semantics do not map automatically to a linear USDT perpetual. Validate WEEX contract metadata and demo P&L calculations explicitly.
-- Preserve event timestamps and use deterministic candle ordering for bars where both a stop and target could be touched; document the conservative fill assumption in tests.
-- Avoid lookahead: a 4H OB may only be used after its 4H candle is confirmed.
-- The small Pine scanner function at the end is a simplified status display, not an exact implementation of the main strategy. Do not treat its ten hard-coded symbols as the bot's market universe.
+- Only confirmed 4H candles create/invalidate OBs and update the 4H SMA.
+- 4H BOS quality: ATR(14), body >= prior 10-bar average body * 1.20 and >= ATR * 0.65; BOS close displacement >= ATR * 0.10; source opposite candle range <= its ATR * 2.50.
+- 4H pivots 3/3; opposite candle search 12; max stored OB 200.
+- Entries are evaluated only on confirmed 15m candles. 15m pivots 3/3; ATR 7.
+- ORDER_BLOCK path uses OB touch/freshness, CHoCH and retest/confirmation filters.
+- TRENDLINE path uses the latest two confirmed 15m pivot highs/lows, descending resistance or ascending support, close breakout, optional pullback/confirmation, and nearest active 4H OB touched by the signal candle. Used OBs remain eligible for this direction check, as in Pine.
+- Both methods use the 4H SMA200 gates enabled in the source. ORDER_BLOCK uses useSMA200Filter; TRENDLINE uses useSMA200TrendlineFilter.
+- Defaults retained: trend filter ON, SL buffer 2.0 ATR, riskReward 2.5, riskPercent 1.0, OB-boundary stop ON, trailing OFF, trailing ATR multiplier 1.5.
+- Trendline stop is the latest opposite 15m pivot +/- ATR * 2.0. OB stop uses the OB boundary and opposite pivot with the same buffer.
+- Pine has one 2.5R target. The separate demo ledger remains unchanged by prior agreement: fixed $100 starting balance, $5 margin, 5x leverage, partial demo targets 1R/2R/3R and BE/trailing ledger behavior. These are demo-account bookkeeping rules, not Pine signal parameters.
+- The small 10-symbol Pine table is not the bot universe. The bot keeps its WEEX two-stage market scanner.
+- Demo only: public market data; no private account endpoints and no real orders.

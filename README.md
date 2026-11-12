@@ -11,7 +11,7 @@ A Telegram-connected, web-managed **demo trading** bot for WEEX market data.
 
 ## Strategy source of truth
 
-The implementation follows only the user's supplied Pine strategy. It is based on 4-hour Order Blocks and 15-minute entry confirmation. Do not merge older bot strategies or add filters absent from the source script.
+The implementation follows the user's supplied Pine v6 strategy: confirmed 4H Order Blocks/BOS and two independent 15m entry methods (ORDER_BLOCK and TRENDLINE). The trendline method requires a valid break and, by default, a pullback/confirmation; direction is gated by the nearest active 4H OB touched by the signal candle. Both methods use the source's 4H SMA200 filters. Do not merge older bot strategies or add filters absent from the source script.
 
 ## Demo trade management
 
@@ -31,7 +31,7 @@ On a hosting provider, the database file must live on a persistent disk/volume. 
 ## Scanner and market data
 
 - Public-only CCXT market data for active linear USDT perpetual markets.
-- Two-stage scanner: rank up to 500 markets, then evaluate up to 60 markets with active 4H OBs using the 15m strategy engine.
+- Two-stage scanner: rank up to 500 markets, then evaluate up to 60 markets with active 4H OBs using both 15m entry methods.
 - Liquidity ranking currently uses 24h quote volume and bid/ask spread; exchange-wide order-book depth ranking is not implemented.
 - Live WEEX responses and candle-by-candle TradingView parity still require verification.
 
