@@ -84,19 +84,65 @@ class WeexMarketData:
         return candidates[:limit]
 
     def resolve_manual_symbol(self, requested: str) -> MarketCandidate:
-        """Validate and resolve an explicitly requested active linear USDT swap."""
+        """Resolve a user symbol to CCXT's canonical active linear USDT swap symbol.
+
+        CCXT commonly represents a USDT-settled perpetual as BTC/USDT:USDT,
+        while users naturally enter BTC, BTCUSDT, or BTC/USDT. Match market
+        metadata rather than assuming the display symbol has one exact format.
+        """
         markets = self.load_markets()
-        normalized = requested.strip().upper().replace("-", "/")
-        if not normalized.endswith("/USDT"):
-            normalized += "/USDT"
-        market = markets.get(normalized)
-        if market is None or not market.get("active", True) or not market.get("swap") or not market.get("linear") or (market.get("quote") or "").upper() != self.quote_currency:
-            raise ValueError(f"نماد {normalized} در بازارهای فعال قرارداد دائمی USDT صرافی WEEX پیدا نشد.")
-        ticker = self._fetch_tickers_cached().get(normalized) or {}
+        raw = requested.strip().upper().replace("-", "/").replace(" ", "")
+        if not raw:
+            raise ValueError("نماد خالی است.")
+
+        # Accept BASE, BASEUSDT, BASE/USDT and BASE/USDT:USDT.
+        if "/" in raw:
+            base, quote_part = raw.split("/", 1)
+            quote = quote_part.split(":", 1)[0]
+            if quote and quote != self.quote_currency:
+                raise ValueError(f"فقط قراردادهای {self.quote_currency} پشتیبانی می‌شوند.")
+        else:
+            suffix = self.quote_currency
+            base = raw[:-len(suffix)] if raw.endswith(suffix) and len(raw) > len(suffix) else raw
+
+        base = base.strip()
+        if not base or not base.replace("_", "").isalnum():
+            raise ValueError("فرمت نماد معتبر نیست.")
+
+        matches = []
+        for key, item in markets.items():
+            symbol = item.get("symbol") or key
+            if (
+                (item.get("base") or "").upper() == base
+                and (item.get("quote") or "").upper() == self.quote_currency
+                and item.get("active", True) is not False
+                and item.get("swap") is True
+                and item.get("linear") is True
+                and (not item.get("settle") or item.get("settle").upper() == self.quote_currency)
+            ):
+                matches.append((symbol, item))
+
+        if not matches:
+            requested_display = f"{base}/{self.quote_currency}"
+            raise ValueError(
+                f"نماد {requested_display} در بازارهای فعال قرارداد دائمی خطی "
+                f"{self.quote_currency} صرافی WEEX پیدا نشد."
+            )
+        if len(matches) > 1:
+            # Prefer the canonical USDT-settled contract if the exchange exposes
+            # more than one linear contract for the same base/quote.
+            matches.sort(key=lambda pair: (pair[1].get("settle") != self.quote_currency, pair[0]))
+        symbol, _market = matches[0]
+
+        ticker = self._fetch_tickers_cached().get(symbol) or {}
         last = float(ticker.get("last") or 0) or None
         volume = float(ticker.get("quoteVolume") or 0)
-        spread, score = _ticker_score(volume, float(ticker["bid"]) if ticker.get("bid") else None, float(ticker["ask"]) if ticker.get("ask") else None)
-        return MarketCandidate(normalized, volume, spread, score, last)
+        spread, score = _ticker_score(
+            volume,
+            float(ticker["bid"]) if ticker.get("bid") else None,
+            float(ticker["ask"]) if ticker.get("ask") else None,
+        )
+        return MarketCandidate(symbol, volume, spread, score, last)
 
     def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int = 300) -> list[list[float]]:
         if limit < 1:
