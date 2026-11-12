@@ -62,17 +62,17 @@ def _to_candles(rows: list[list[float]]) -> list[Candle]:
 
 def _ordered_feed(engine: OrderBlockStrategy, bars4: list[Candle],
                   bars15: list[Candle]) -> Signal | None:
-    """Replay closed 4h/15m candles by close-time, with 4h first on ties."""
+    """Replay closed candles by close-time; process the final 15m bar before the new 4h close on boundary ties to avoid HTF lookahead."""
     events: list[tuple[int, int, Candle]] = []
-    events.extend((bar.timestamp + MS_4H, 0, bar) for bar in bars4)
-    events.extend((bar.timestamp + MS_15M, 1, bar) for bar in bars15)
+    events.extend((bar.timestamp + MS_4H, 1, bar) for bar in bars4)
+    events.extend((bar.timestamp + MS_15M, 0, bar) for bar in bars15)
     events.sort(key=lambda event: (event[0], event[1]))
     latest_signal = None
     now_ms = int(time.time() * 1000)
     for close_time, kind, bar in events:
         if close_time > now_ms:
             continue
-        if kind == 0:
+        if kind == 1:
             engine.on_4h_close(bar)
         else:
             signal = engine.on_15m_close(bar)

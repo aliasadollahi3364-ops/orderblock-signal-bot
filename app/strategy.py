@@ -333,14 +333,14 @@ class OrderBlockStrategy:
                 base = min(self.last_pl15, bottom) if cfg.use_ob_boundary_sl else self.last_pl15
                 stop = base-atr*cfg.sl_buffer_atr
                 if candle.close-stop >= cfg.min_tick:
-                    if cfg.use_sma200_filter and (sma is None or candle.close <= sma): continue
+                    if cfg.use_sma200_filter and (sma is None or candle.close <= sma): return None
                     ob.used = True
                     return Signal(self.symbol, "BUY", candle.timestamp, candle.close, stop, atr, ob.origin_time, top, bottom, self.trend4h, sma, "ORDER_BLOCK", cfg.risk_reward)
             if can_use and retest and direction == -1 and bear_dir and bear_power and self.last_ph15 is not None:
                 base = max(self.last_ph15, top) if cfg.use_ob_boundary_sl else self.last_ph15
                 stop = base+atr*cfg.sl_buffer_atr
                 if stop-candle.close >= cfg.min_tick:
-                    if cfg.use_sma200_filter and (sma is None or candle.close >= sma): continue
+                    if cfg.use_sma200_filter and (sma is None or candle.close >= sma): return None
                     ob.used = True
                     return Signal(self.symbol, "SELL", candle.timestamp, candle.close, stop, atr, ob.origin_time, top, bottom, self.trend4h, sma, "ORDER_BLOCK", cfg.risk_reward)
 
