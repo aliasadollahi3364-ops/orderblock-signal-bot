@@ -217,18 +217,29 @@ async def remove_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not context.args:
         await update.effective_message.reply_text("مثال: /remove BTC یا /remove BTC/USDT")
         return
-    requested = " ".join(context.args).strip().upper()
-    if not requested.endswith("/USDT"):
-        requested += "/USDT"
-    if requested not in runtime.manual_symbols:
+    requested = " ".join(context.args).strip().upper().replace("-", "/").replace(" ", "")
+    if "/" in requested:
+        base, quote_part = requested.split("/", 1)
+        quote = quote_part.split(":", 1)[0]
+        if quote and quote != "USDT":
+            await update.effective_message.reply_text("فقط نمادهای قرارداد USDT را می‌توان حذف کرد.")
+            return
+    else:
+        base = requested[:-4] if requested.endswith("USDT") and len(requested) > 4 else requested
+    matched = next(
+        (symbol for symbol in runtime.manual_symbols
+         if symbol.split("/", 1)[0].upper() == base),
+        None,
+    )
+    if matched is None:
         await update.effective_message.reply_text(
             "این ارز در فهرست دستی نیست. حذف فقط برای ارزهایی انجام می‌شود که خودت اضافه کرده‌ای."
         )
         return
-    runtime.manual_symbols.remove(requested)
+    runtime.manual_symbols.remove(matched)
     if runtime.storage is not None:
         runtime.storage.save_manual_symbols(runtime.manual_symbols)
-    await update.effective_message.reply_text(f"🗑 {requested} از فهرست دستی حذف شد.")
+    await update.effective_message.reply_text(f"🗑 {matched} از فهرست دستی حذف شد.")
 
 
 def _resolve_symbol(requested: str):
