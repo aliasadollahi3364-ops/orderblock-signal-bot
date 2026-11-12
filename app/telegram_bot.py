@@ -27,7 +27,7 @@ async def _delete_later(bot, chat_id: int, message_id: int) -> None:
 
 
 async def _reply_temporary(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, **kwargs):
-    message = await _reply_temporary(update, context, text, **kwargs)
+    message = await update.effective_message.reply_text(text, **kwargs)
     context.application.create_task(
         _delete_later(context.bot, message.chat_id, message.message_id),
         name=f"delete-temporary-{message.message_id}",
@@ -51,7 +51,7 @@ async def _authorized(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
     actual_chat_id = update.effective_chat.id if update.effective_chat else None
     if not allowed_chat_id or str(actual_chat_id) != str(allowed_chat_id):
         if update.effective_message:
-            await update.effective_message.reply_text("دسترسی مجاز نیست.")
+            await _reply_temporary(update, context, "دسترسی مجاز نیست.")
         return False
     return True
 
@@ -112,6 +112,7 @@ MAIN_MENU = ReplyKeyboardMarkup(
     [
         ["/status", "/demo"],
         ["/open", "/stats"],
+        ["/panel", "/history"],
         ["/panel", "/history"],
         ["مدیریت ارزها", "تنظیمات استراتژی"],
         ["/help", "/menu"],
@@ -520,7 +521,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     await update.effective_message.reply_text(
         "/start - شروع\n/status - وضعیت ربات\n/demo - موجودی دمو\n"
-        "/open - معاملات باز\n/pairs - فهرست ارزها\n/add BTC - افزودن ارز دستی\n"
+        "/open - معاملات باز\n/panel - پنل حرفه‌ای حساب دمو\n/history - تاریخچه معاملات\n/pairs - فهرست ارزها\n/add BTC - افزودن ارز دستی\n"
         "/remove BTC - حذف ارز دستی\n/auto_pairs - وضعیت انتخاب خودکار\n/stats - آمار حساب\n"
         "/strategy - نمایش تنظیمات\n/set pivot4 4 - تغییر عدد\n"
         "/enable trendline - فعال‌کردن سیگنال خط روند\n/disable trendline - غیرفعال‌کردن آن\n"
