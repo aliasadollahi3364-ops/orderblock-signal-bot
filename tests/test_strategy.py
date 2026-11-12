@@ -1,3 +1,7 @@
+import json
+import sqlite3
+
+from app.storage import SQLiteStore
 from app.strategy import Candle, OrderBlockStrategy, StrategyConfig
 
 
@@ -114,3 +118,20 @@ def test_trendline_signal_configuration_is_independent_from_ob_trend_filter():
     assert cfg.enable_trendline_signals
     assert not cfg.use_trend_filter
     assert cfg.use_sma200_trendline_filter
+
+
+
+def test_legacy_saved_strategy_settings_reset_to_current_pine_defaults(tmp_path):
+    path = str(tmp_path / "legacy-settings.sqlite3")
+    store = SQLiteStore(path)
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "INSERT INTO scanner_settings(key, value) VALUES ('strategy_config', ?)",
+            (json.dumps({"pivot4": 3, "sl_buffer_atr": 0.15,
+                         "use_sma200_filter": False}),),
+        )
+    cfg = store.load_strategy_config()
+    assert cfg.sl_buffer_atr == 2.0
+    assert cfg.use_sma200_filter is True
+    assert cfg.enable_trendline_signals is True
+    assert cfg.use_trend_filter is True

@@ -131,6 +131,12 @@ class SQLiteStore:
                 return StrategyConfig()
             try:
                 values = json.loads(row["value"])
+                # Older saved settings predate the user's current Pine source
+                # (4H OB quality filters + separate 15m trendline path). Do not
+                # let stale values such as the former 0.15 ATR stop buffer
+                # silently override the new source-of-truth defaults.
+                if "ob_atr_len" not in values or "enable_trendline_signals" not in values:
+                    return StrategyConfig()
                 allowed = set(StrategyConfig.__dataclass_fields__)
                 return StrategyConfig(**{key: value for key, value in values.items() if key in allowed})
             except (TypeError, ValueError, json.JSONDecodeError):
