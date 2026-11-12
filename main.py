@@ -68,8 +68,18 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
             send(f"📣 سیگنال دمو {signal.symbol} | {signal.side}\nروش ورود: {signal.method}\nورود: {signal.entry:g}\nحد ضرر: {signal.stop:g}\nفقط دمو؛ معاملات واقعی خاموش")
     def handle_signal(signal: Signal) -> None:
         position = open_demo_from_signal(signal)
-        if position is not None and bot is not None:
-            asyncio.run_coroutine_threadsafe(send_signal_photo(signal, position), loop)
+        if position is not None:
+            runtime.closed_trade_events.append({
+                "symbol": position.symbol,
+                "side": position.side.value,
+                "type": "OPEN",
+                "price": position.entry,
+                "time": position.opened_at,
+                "realized_pnl": 0.0,
+            })
+            runtime.persist_demo_state()
+            if bot is not None:
+                asyncio.run_coroutine_threadsafe(send_signal_photo(signal, position), loop)
     def handle_trade_event(event: dict) -> None:
         send(f"🔔 رویداد معامله دمو | {event['symbol']}\nوضعیت: {event['type']}\nقیمت خروج/رویداد: {event['price']:g}\nزمان خروج/رویداد: {event['time']}\nسود/زیان تحقق‌یافته: {event['realized_pnl']:+.4f} USDT\nمعاملات واقعی: خاموش")
     scanner = AutomaticScanner(market_data=market_data, strategy_config=runtime.strategy_config,
