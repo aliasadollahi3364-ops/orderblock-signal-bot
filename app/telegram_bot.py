@@ -2,12 +2,48 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from io import BytesIO
+
+from PIL import Image, ImageDraw
 
 from telegram import ReplyKeyboardMarkup, Update
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 from app.runtime import runtime
 from app.strategy import StrategyConfig
+
+import asyncio
+from telegram.error import TelegramError
+
+TEMP_MESSAGE_TTL_SECONDS = 120
+
+
+async def _delete_later(bot, chat_id: int, message_id: int) -> None:
+    await asyncio.sleep(TEMP_MESSAGE_TTL_SECONDS)
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except TelegramError:
+        pass
+
+
+async def _reply_temporary(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, **kwargs):
+    message = await _reply_temporary(update, context, text, **kwargs)
+    context.application.create_task(
+        _delete_later(context.bot, message.chat_id, message.message_id),
+        name=f"delete-temporary-{message.message_id}",
+    )
+    return message
+
+
+async def _send_temporary_photo(update: Update, context: ContextTypes.DEFAULT_TYPE, photo, caption: str):
+    message = await update.effective_message.reply_photo(photo=photo, caption=caption)
+    context.application.create_task(
+        _delete_later(context.bot, message.chat_id, message.message_id),
+        name=f"delete-temporary-photo-{message.message_id}",
+    )
+    return message
+
+
 
 
 async def _authorized(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -76,6 +112,7 @@ MAIN_MENU = ReplyKeyboardMarkup(
     [
         ["/status", "/demo"],
         ["/open", "/stats"],
+        ["/panel", "/history"],
         ["مدیریت ارزها", "تنظیمات استراتژی"],
         ["/help", "/menu"],
     ],
@@ -163,6 +200,114 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"سود/زیان ثبت‌شده معاملات: {realized:+.4f} USDT\n"
         f"معاملات بسته‌شده: {closed}\nمعاملات باز: {len(acct.open_positions)}"
     )
+
+
+
+def _demo_panel_text() -> str:
+    acct = runtime.account
+    positions = list(acct.positions.values())
+    closed = [p for p in positions if p.closed]
+    wins = sum(1 for p in closed if p.realized_pnl > 0)
+    losses = sum(1 for p in closed if p.realized_pnl < 0)
+    breakeven = len(closed) - wins - losses
+    realized = sum(p.realized_pnl for p in positions)
+    win_rate = (wins / len(closed) * 100.0) if closed else 0.0
+    pnl_pct = (realized / acct.initial_balance * 100.0) if acct.initial_balance else 0.0
+    return (
+        "📊 پنل حرفه‌ای حساب دمو\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"💰 موجودی اولیه: {acct.initial_balance:.2f} USDT\n"
+        f"💵 موجودی فعلی: {float(acct.balance or 0):.2f} USDT\n"
+        f"📈 سود/زیان تحقق‌یافته: {realized:+.4f} USDT ({pnl_pct:+.2f}%)\n"
+        f"🎯 درصد معاملات برنده: {win_rate:.1f}%\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"🟢 معاملات سودده: {wins}\n🔴 معاملات زیان‌ده: {losses}\n"
+        f"⚪ سربه‌سر: {breakeven}\n"
+        f"📂 معاملات باز: {len(acct.open_positions)}\n"
+        f"📁 معاملات بسته: {len(closed)}\n"
+        f"🔒 مارجین مصرف‌شده: {acct.margin_used:.2f} USDT\n"
+        f"🆓 مارجین آزاد: {acct.free_margin:.2f} USDT\n"
+        f"⚙️ اندازه هر معامله: {acct.notional:.2f} USDT | اهرم: {acct.leverage:g}x\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "حساب آزمایشی است؛ معاملات واقعی غیرفعال."
+    )
+
+
+def _demo_equity_chart() -> BytesIO:
+    acct = runtime.account
+    events = sorted(runtime.closed_trade_events, key=lambda e: str(e.get("time", "")))
+    balance = float(acct.initial_balance)
+    points = [balance]
+    last_realized_by_symbol = {}
+    opened = set()
+    for event in events:
+        symbol = str(event.get("symbol", ""))
+        kind = str(event.get("type", ""))
+        if kind == "OPEN":
+            balance -= acct.notional * acct.fee_rate
+            last_realized_by_symbol[symbol] = 0.0
+            opened.add(symbol)
+            points.append(balance)
+        elif symbol:
+            current = float(event.get("realized_pnl", 0.0) or 0.0)
+            previous = last_realized_by_symbol.get(symbol, 0.0)
+            balance += current - previous
+            last_realized_by_symbol[symbol] = current
+            points.append(balance)
+    if len(points) == 1:
+        points.append(float(acct.balance or acct.initial_balance))
+    width, height = 1000, 480
+    image = Image.new("RGB", (width, height), "#101820")
+    draw = ImageDraw.Draw(image)
+    draw.text((40, 24), "DEMO ACCOUNT EQUITY", fill="#ffffff")
+    draw.text((40, 54), f"Initial: {acct.initial_balance:.2f} USDT   Current: {float(acct.balance or 0):.2f} USDT", fill="#b8c7d9")
+    left, right, top, bottom = 70, 950, 110, 410
+    lo, hi = min(points), max(points)
+    pad = max((hi - lo) * 0.15, abs(hi) * 0.002, 0.01)
+    lo -= pad
+    hi += pad
+    def xy(index, value):
+        x = left + (right-left) * index / max(1, len(points)-1)
+        y = bottom - (value-lo) / (hi-lo) * (bottom-top)
+        return int(x), int(y)
+    draw.line((left, bottom, right, bottom), fill="#526273", width=1)
+    coords = [xy(i, value) for i, value in enumerate(points)]
+    if len(coords) > 1:
+        draw.line(coords, fill="#28c98b", width=4)
+    for x, y in coords:
+        draw.ellipse((x-4, y-4, x+4, y+4), fill="#28c98b")
+    draw.text((left, top-25), f"{hi:.2f}", fill="#b8c7d9")
+    draw.text((left, bottom+10), f"{lo:.2f} USDT", fill="#b8c7d9")
+    out = BytesIO()
+    image.save(out, format="PNG", optimize=True)
+    out.seek(0)
+    return out
+
+
+async def demo_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    await _send_temporary_photo(update, context, _demo_equity_chart(), _demo_panel_text())
+
+
+async def trade_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    positions = sorted(runtime.account.positions.values(), key=lambda p: p.opened_at or "", reverse=True)
+    if not positions:
+        await _reply_temporary(update, context, "📜 هنوز معامله‌ای در حساب دمو ثبت نشده است.")
+        return
+    lines = ["📜 تاریخچه معاملات دمو"]
+    for p in positions[:15]:
+        state = "باز" if not p.closed else ("سود" if p.realized_pnl > 0 else "زیان" if p.realized_pnl < 0 else "سربه‌سر")
+        lines.append(
+            f"\n{p.symbol} | {'خرید' if p.side.value == 'LONG' else 'فروش'} | {state}\n"
+            f"ورود: {p.entry:g} | حدضرر اولیه: {p.initial_stop:g}\n"
+            f"TP1: {p.tp1:g} | TP2: {p.tp2:g} | TP3: {p.tp3:g}\n"
+            f"سود/زیان تحقق‌یافته: {p.realized_pnl:+.4f} USDT\n"
+            f"زمان ورود: {p.opened_at or 'نامشخص'}"
+        )
+    await _reply_temporary(update, context, "\n".join(lines))
 
 
 async def pairs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -392,7 +537,7 @@ def build_telegram_application(token: str, allowed_chat_id: str) -> Application:
     application.bot_data["allowed_chat_id"] = allowed_chat_id
     for command, callback in (
         ("start", start), ("menu", menu), ("status", status), ("demo", demo),
-        ("open", open_positions), ("pairs", pairs), ("add", add_pair), ("remove", remove_pair), ("auto_pairs", auto_pairs), ("stats", stats), ("strategy", strategy),
+        ("open", open_positions), ("panel", demo_panel), ("history", trade_history), ("pairs", pairs), ("add", add_pair), ("remove", remove_pair), ("auto_pairs", auto_pairs), ("stats", stats), ("strategy", strategy),
         ("set", set_strategy_value), ("enable", enable_strategy), ("disable", disable_strategy), ("reset_strategy", reset_strategy), ("help", help_command),
     ):
         application.add_handler(CommandHandler(command, callback))
