@@ -41,6 +41,9 @@ def _strategy_text() -> str:
     labels = {
         "pivot4": "پیوت ۴ساعته", "body_len": "میانگین بدنه کندل ۴ساعته",
         "ob_search": "جستجوی کندل اردربلاک", "max_stored_ob": "حداکثر OB ذخیره",
+        "ob_atr_len": "دوره ATR کیفیت OB", "min_bos_body_atr": "حداقل بدنه BOS/ATR",
+        "min_bos_body_avg": "حداقل بدنه BOS/میانگین", "min_break_atr": "حداقل فاصله شکست/ATR",
+        "max_ob_candle_range_atr": "حداکثر دامنه کندل OB/ATR",
         "pivot15": "پیوت ۱۵دقیقه", "max_wait": "حداکثر انتظار CHoCH",
         "atr_len": "دوره ATR", "use_trend_filter": "فیلتر روند",
         "require_ob_touch": "الزام برخورد به OB", "use_touch_freshness": "تازگی برخورد",
@@ -48,17 +51,23 @@ def _strategy_text() -> str:
         "use_choch_strength": "قدرت CHoCH", "min_choch_body_atr": "حداقل بدنه CHoCH/ATR",
         "use_retest_filter": "فیلتر Retest", "retest_atr": "تلورانس Retest/ATR",
         "use_confirm_candle": "کندل تأیید", "use_confirm_strength": "قدرت کندل تأیید",
-        "min_confirm_body_atr": "حداقل بدنه تأیید/ATR", "sl_buffer_atr": "بافر حدضرر/ATR",
+        "min_confirm_body_atr": "حداقل بدنه تأیید/ATR",
+        "enable_trendline_signals": "فعال‌بودن سیگنال خط روند",
+        "use_sma200_trendline_filter": "فیلتر SMA200 خط روند",
+        "require_trendline_pullback": "الزام پولبک خط روند",
+        "trendline_retest_atr": "تلورانس پولبک خط روند/ATR",
+        "trendline_pullback_max_wait": "مهلت پولبک خط روند",
+        "risk_percent": "ریسک سرمایه درصد", "risk_reward": "نسبت ریسک به سود",
+        "sl_buffer_atr": "بافر حدضرر/ATR",
         "use_ob_boundary_sl": "حدضرر مرز OB", "sma_length": "دوره SMA",
-        "use_sma200_filter": "فیلتر SMA200", "use_break_even": "حدضرر سر به سر",
-        "break_even_trigger_r": "فعال‌سازی BE برحسب R", "use_trailing_stop": "تریلینگ استاپ",
+        "use_sma200_filter": "فیلتر SMA200 اردربلاک", "use_trailing_stop": "تریلینگ استاپ",
         "trailing_atr_mult": "ضریب تریلینگ", "min_tick": "حداقل گام قیمت",
     }
-    lines = ["⚙️ تنظیمات استراتژی اسکنر", "منبع تنظیمات: StrategyConfig فعلی ربات"]
+    lines = ["⚙️ تنظیمات استراتژی", "دو مسیر ورود: اردربلاک ۱۵ دقیقه و خط روند ۱۵ دقیقه", "منبع روند و محدوده مرجع: اردربلاک ۴ ساعته"]
     for key, value in asdict(cfg).items():
         shown = "روشن" if value is True else "خاموش" if value is False else str(value)
         lines.append(f"{labels.get(key, key)}: {shown}")
-    lines.append("\nتایم‌فریم اردربلاک: 4H | تایم‌فریم ورود: 15m")
+    lines.append("\nتایم‌فریم مرجع: 4H | تایم‌فریم صدور هر دو نوع سیگنال: 15m")
     lines.append("توجه: این خروجی مقادیر پیش‌فرض موتور استراتژی را نشان می‌دهد.")
     return "\n".join(lines)
 
@@ -251,6 +260,9 @@ async def strategy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 STRATEGY_ALIASES = {
     "trend": "use_trend_filter",
+    "trendline": "enable_trendline_signals",
+    "trendline_sma": "use_sma200_trendline_filter",
+    "trendline_pullback": "require_trendline_pullback",
     "ob_touch": "require_ob_touch",
     "touch_freshness": "use_touch_freshness",
     "choch": "use_choch_filter",
@@ -313,15 +325,15 @@ async def toggle_strategy_value(update: Update, context: ContextTypes.DEFAULT_TY
         return
     if len(context.args) != 1:
         await update.effective_message.reply_text(
-            "نام گزینه را وارد کن. مثال: /enable sma200 یا /disable trailing"
+            "نام گزینه را وارد کن. مثال: /enable trendline یا /disable trendline_pullback"
         )
         return
     key = STRATEGY_ALIASES.get(context.args[0].lower(), context.args[0].lower())
     values = asdict(runtime.strategy_config or StrategyConfig())
     if key not in values or not isinstance(values[key], bool):
         await update.effective_message.reply_text(
-            "گزینه روشن/خاموش پیدا نشد. نام‌های کوتاه: trend, ob_touch, choch, retest, "
-            "confirm_candle, sma200, break_even, trailing"
+            "گزینه روشن/خاموش پیدا نشد. نام‌های کوتاه: trend, trendline, trendline_sma, trendline_pullback, "
+            "ob_touch, choch, retest, confirm_candle, sma200, trailing"
         )
         return
     values[key] = enabled
