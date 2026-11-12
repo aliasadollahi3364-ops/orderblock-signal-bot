@@ -252,7 +252,8 @@ async def strategy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await _authorized(update, context):
         await update.effective_message.reply_text(
             _strategy_text()
-            + "\n\nبرای تغییر: /enable sma200 یا /disable sma200"
+            + "\n\n/enable trendline یا /disable trendline برای فعال/غیرفعال‌کردن مسیر خط روند"
+            + "\n/enable trendline_sma برای فیلتر SMA200 خط روند"
             + "\nبرای عددها: /set pivot4 4"
             + "\nبازنشانی: /reset_strategy"
         )
@@ -363,7 +364,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     await update.effective_message.reply_text(
         "/start - شروع\n/status - وضعیت ربات\n/demo - موجودی دمو\n"
-        "/open - معاملات باز\n/pairs - فهرست ارزها\n/add BTC - افزودن ارز دستی\n/remove BTC - حذف ارز دستی\n/auto_pairs - وضعیت انتخاب خودکار\n/stats - آمار حساب\n/strategy - نمایش تنظیمات\n/set pivot4 4 - تغییر عدد\n/enable sma200 - روشن کردن فیلتر\n/disable sma200 - خاموش کردن فیلتر\n/reset_strategy - بازنشانی\n/help - راهنما"
+        "/open - معاملات باز\n/pairs - فهرست ارزها\n/add BTC - افزودن ارز دستی\n"
+        "/remove BTC - حذف ارز دستی\n/auto_pairs - وضعیت انتخاب خودکار\n/stats - آمار حساب\n"
+        "/strategy - نمایش تنظیمات\n/set pivot4 4 - تغییر عدد\n"
+        "/enable trendline - فعال‌کردن سیگنال خط روند\n/disable trendline - غیرفعال‌کردن آن\n"
+        "/enable trendline_sma - فیلتر SMA200 خط روند\n"
+        "/enable trendline_pullback - الزام پولبک خط روند\n"
+        "/enable sma200 - فیلتر SMA200 اردربلاک\n/reset_strategy - بازنشانی\n/help - راهنما"
     )
 
 
