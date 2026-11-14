@@ -122,6 +122,18 @@ def test_trendline_signal_configuration_is_independent_from_ob_trend_filter():
 
 
 
+def test_saved_strategy_settings_cannot_disable_required_trendline_pullback(tmp_path):
+    path = str(tmp_path / "trendline-pullback.sqlite3")
+    store = SQLiteStore(path)
+    cfg = StrategyConfig(require_trendline_pullback=False)
+
+    store.save_strategy_config(cfg)
+    loaded = store.load_strategy_config()
+
+    assert loaded.require_trendline_pullback is True
+    assert cfg.require_trendline_pullback is False  # saving does not mutate caller state
+
+
 def test_legacy_saved_strategy_settings_reset_to_current_pine_defaults(tmp_path):
     path = str(tmp_path / "legacy-settings.sqlite3")
     store = SQLiteStore(path)
