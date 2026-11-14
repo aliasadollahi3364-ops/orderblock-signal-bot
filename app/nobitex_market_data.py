@@ -59,6 +59,8 @@ class NobitexMarketData:
         self._margin_cache: tuple[float, list[MarginMarket]] | None = None
         self._stats_cache: tuple[float, dict[str, Any]] | None = None
         self._ohlcv_cache: dict[tuple[str, str, int], tuple[float, list[list[float]]]] = {}
+        self._trades_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+        self._orderbook_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
     def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         response = self.session.get(f"{BASE_URL}{path}", params=params, timeout=self.timeout)
@@ -203,18 +205,28 @@ class NobitexMarketData:
 
     def fetch_trades(self, symbol: str) -> list[dict[str, Any]]:
         canonical = symbol.strip().upper().replace("/", "").replace("-", "")
+        now = time.monotonic()
+        cached = self._trades_cache.get(canonical)
+        if cached and now < cached[0]:
+            return list(cached[1])
         payload = self._get(f"/v2/trades/{canonical}")
         trades = payload.get("trades")
         if not isinstance(trades, list):
             raise RuntimeError(f"Malformed trades response for {canonical}.")
-        return trades
+        self._trades_cache[canonical] = (now + 65.0, trades)
+        return list(trades)
 
     def fetch_orderbook(self, symbol: str) -> dict[str, Any]:
         canonical = symbol.strip().upper().replace("/", "").replace("-", "")
+        now = time.monotonic()
+        cached = self._orderbook_cache.get(canonical)
+        if cached and now < cached[0]:
+            return dict(cached[1])
         payload = self._get(f"/v3/orderbook/{canonical}")
         if payload.get("status") != "ok":
             raise RuntimeError(f"Malformed orderbook response for {canonical}.")
-        return payload
+        self._orderbook_cache[canonical] = (now + 5.0, payload)
+        return dict(payload)
 
     def close(self) -> None:
         self.session.close()
