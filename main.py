@@ -94,11 +94,11 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
         }
         label = event_labels.get(str(event.get("type")), f"رویداد معامله: {event.get('type')}")
         text = (
-            f"{label} | {event['symbol']}\\n"
-            f"جهت: {event.get('side', 'نامشخص')}\\n"
-            f"قیمت رویداد: {event['price']:g}\\n"
-            f"زمان: {event['time']}\\n"
-            f"سود/زیان تحقق‌یافته تا این لحظه: {event['realized_pnl']:+.4f} USDT\\n"
+            f"{label} | {event['symbol']}\n"
+            f"جهت: {event.get('side', 'نامشخص')}\n"
+            f"قیمت رویداد: {event['price']:g}\n"
+            f"زمان: {event['time']}\n"
+            f"سود/زیان تحقق‌یافته تا این لحظه: {event['realized_pnl']:+.4f} USDT\n"
             "حساب دمو | معاملات واقعی: خاموش"
         )
         future = asyncio.run_coroutine_threadsafe(
