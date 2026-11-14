@@ -99,7 +99,7 @@ def _strategy_text() -> str:
         "risk_percent": "ریسک سرمایه درصد", "risk_reward": "نسبت ریسک به سود",
         "sl_buffer_atr": "بافر حدضرر/ATR",
         "use_ob_boundary_sl": "حدضرر مرز OB", "sma_length": "دوره SMA",
-        "use_sma200_filter": "فیلتر SMA200 اردربلاک", "use_trailing_stop": "تریلینگ استاپ",
+        "use_sma200_filter": "فیلتر SMA200 اردربلاک", "use_trailing_stop": "تریلینگ استاپ (در دمو غیرفعال)",
         "trailing_atr_mult": "ضریب تریلینگ", "min_tick": "حداقل گام قیمت",
     }
     lines = ["⚙️ تنظیمات استراتژی", "مسیر اول: برخورد به اردربلاک ۴ساعته + تغییر روند و پولبک ۱۵دقیقه‌ای", "مسیر دوم: شکست خط روند ۱۵دقیقه‌ای + پولبک و تأیید", "محدوده مرجع: اردربلاک ۴ساعته"]
@@ -438,7 +438,6 @@ STRATEGY_ALIASES = {
     "confirm_strength": "use_confirm_strength",
     "ob_boundary_sl": "use_ob_boundary_sl",
     "sma200": "use_sma200_filter",
-    "trailing": "use_trailing_stop",
 }
 
 
@@ -501,6 +500,9 @@ async def toggle_strategy_value(update: Update, context: ContextTypes.DEFAULT_TY
             "گزینه روشن/خاموش پیدا نشد. نام‌های کوتاه: trend, trendline, trendline_sma, trendline_pullback, "
             "ob_touch, choch, retest, confirm_candle, sma200, trailing"
         )
+        return
+    if key == "use_trailing_stop" and enabled:
+        await _reply_temporary(update, context, "تریلینگ استاپ هنوز در مدیریت معاملات دمو پیاده‌سازی نشده؛ فعلاً قابل فعال‌سازی نیست.")
         return
     if key == "require_trendline_pullback" and not enabled:
         await _reply_temporary(update, context, "پولبک خط روند در Pine اصلی اجباری است و نمی‌توان آن را خاموش کرد.")
