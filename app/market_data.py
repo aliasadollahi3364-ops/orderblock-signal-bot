@@ -58,33 +58,6 @@ class WeexMarketData:
         self._ticker_cache = (now + 60.0, tickers)
         return tickers
 
-    def fetch_usdt_perpetuals(self, limit: int = 500) -> list[MarketCandidate]:
-        if limit < 1:
-            raise ValueError("limit must be positive")
-        markets = self.load_markets()
-        tickers = self._fetch_tickers_cached()
-        candidates: list[MarketCandidate] = []
-        for symbol, market in markets.items():
-            if not market.get("active", True) or not market.get("swap") or not market.get("linear"):
-                continue
-            if (market.get("quote") or "").upper() != self.quote_currency:
-                continue
-            ticker = tickers.get(symbol) or {}
-            quote_volume = ticker.get("quoteVolume")
-            if quote_volume is None or float(quote_volume) <= 0:
-                base_volume, last = ticker.get("baseVolume"), ticker.get("last")
-                if base_volume is None or last is None:
-                    continue
-                quote_volume = float(base_volume) * float(last)
-            quote_volume = float(quote_volume)
-            bid = float(ticker["bid"]) if ticker.get("bid") else None
-            ask = float(ticker["ask"]) if ticker.get("ask") else None
-            spread, score = _ticker_score(quote_volume, bid, ask)
-            last_price = float(ticker["last"]) if ticker.get("last") else None
-            candidates.append(MarketCandidate(symbol, quote_volume, spread, score, last_price))
-        candidates.sort(key=lambda item: item.rank_score, reverse=True)
-        return candidates[:limit]
-
     def resolve_manual_symbol(self, requested: str) -> MarketCandidate:
         """Resolve a user symbol to CCXT's canonical active linear USDT swap symbol.
 
