@@ -66,10 +66,36 @@ def test_fetch_ohlcv_converts_udf_seconds_to_ccxt_milliseconds():
     assert captured["countback"] == 2
 
 
-def test_adapter_requires_token_for_margin_market_catalog():
+def test_manual_public_market_mode_does_not_require_token():
+    client = NobitexMarketData("")
+    assert not client.has_token
+    client.fetch_market_stats = lambda force=False: {
+        "btc-usdt": {
+            "isClosed": False, "latest": "65000", "volumeDst": "1000000",
+            "bestBuy": "64990", "bestSell": "65010",
+        }
+    }
+    market = client.resolve_manual_symbol("btc")
+    assert market.symbol == "BTCUSDT"
+    assert market.last_price == 65000
+    assert market.margin_eligibility_confirmed is False
+
+
+def test_margin_catalog_still_requires_token():
+    client = NobitexMarketData("")
     try:
-        NobitexMarketData("")
-    except ValueError as exc:
-        assert "NOBITEX_API_TOKEN" in str(exc)
+        client.fetch_margin_markets()
+    except RuntimeError as exc:
+        assert "توکن" in str(exc)
     else:
-        raise AssertionError("read-only token should be required")
+        raise AssertionError("official margin catalog should require token")
+
+
+def test_demo_rejects_irt_market_because_account_is_usdt():
+    client = NobitexMarketData("")
+    try:
+        client.resolve_manual_symbol("BTCIRT")
+    except ValueError as exc:
+        assert "USDT" in str(exc)
+    else:
+        raise AssertionError("IRT pair must not be mixed into USDT demo accounting")
