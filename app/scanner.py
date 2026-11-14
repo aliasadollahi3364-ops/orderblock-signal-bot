@@ -225,7 +225,7 @@ class AutomaticScanner:
         if self.explosive_scanner is not None and runtime.manual_symbols:
             # Independent alert engine: does not open demo positions or alter the
             # user's existing OB/trendline strategy trade ledger.
-            self.explosive_scanner.scan_once(list(runtime.manual_symbols))
+            self.explosive_scanner.scan_once([market.symbol for market in manual_markets])
 
         self._selected = [market.symbol for market in selected_markets]
         runtime.selected_symbols = list(self._selected)
