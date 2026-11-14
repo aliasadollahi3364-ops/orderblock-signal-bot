@@ -40,7 +40,7 @@ class WeexMarketData:
         })
         self.quote_currency = quote_currency.upper()
         self._markets: dict[str, dict[str, Any]] | None = None
-        self._ticker_cache: tuple[float, dict[str, Any]] | None = None
+        self._ticker_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._ohlcv_cache: dict[tuple[str, str, int], tuple[float, list[list[float]]]] = {}
         self._trades_cache: dict[tuple[str, int], tuple[float, list[dict[str, Any]]]] = {}
         self._orderbook_cache: dict[tuple[str, int], tuple[float, dict[str, Any]]] = {}
@@ -50,13 +50,15 @@ class WeexMarketData:
             self._markets = self.exchange.load_markets()
         return self._markets
 
-    def _fetch_tickers_cached(self) -> dict[str, Any]:
+    def _fetch_ticker_cached(self, symbol: str) -> dict[str, Any]:
+        """Fetch only the explicitly requested symbol's ticker."""
         now = time.monotonic()
-        if self._ticker_cache and now < self._ticker_cache[0]:
-            return self._ticker_cache[1]
-        tickers = self.exchange.fetch_tickers()
-        self._ticker_cache = (now + 60.0, tickers)
-        return tickers
+        cached = self._ticker_cache.get(symbol)
+        if cached and now < cached[0]:
+            return cached[1].copy()
+        ticker = self.exchange.fetch_ticker(symbol)
+        self._ticker_cache[symbol] = (now + 60.0, ticker)
+        return ticker.copy()
 
     def resolve_manual_symbol(self, requested: str) -> MarketCandidate:
         """Resolve a user symbol to CCXT's canonical active linear USDT swap symbol.
@@ -109,7 +111,7 @@ class WeexMarketData:
             matches.sort(key=lambda pair: (pair[1].get("settle") != self.quote_currency, pair[0]))
         symbol, _market = matches[0]
 
-        ticker = self._fetch_tickers_cached().get(symbol) or {}
+        ticker = self._fetch_ticker_cached(symbol) or {}
         last = float(ticker.get("last") or 0) or None
         volume = float(ticker.get("quoteVolume") or 0)
         spread, score = _ticker_score(
