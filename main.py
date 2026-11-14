@@ -10,6 +10,7 @@ from app.charting import make_signal_chart
 from app.config import Settings
 from app.demo import DemoAccount
 from app.market_data import WeexMarketData
+from app.nobitex_market_data import NobitexMarketData
 from app.runtime import runtime
 from app.scanner import AutomaticScanner, open_demo_from_signal
 from app.storage import SQLiteStore
@@ -38,7 +39,10 @@ async def run_telegram(token: str, chat_id: str) -> None:
         await application.shutdown()
 
 async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> None:
-    market_data = WeexMarketData(settings.exchange_id, settings.quote_currency)
+    if settings.exchange_id.lower() == "nobitex":
+        market_data = NobitexMarketData(settings.nobitex_api_token)
+    else:
+        market_data = WeexMarketData(settings.exchange_id, settings.quote_currency)
     runtime.market_symbol_resolver = market_data.resolve_manual_symbol
     bot = Bot(token=settings.telegram_bot_token) if settings.telegram_bot_token and settings.telegram_chat_id else None
     if bot is not None: await bot.initialize()
