@@ -132,7 +132,7 @@ class NobitexMarketData:
 
     def resolve_manual_symbol(self, requested: str) -> NobitexMarketCandidate:
         """Resolve a manually entered public market symbol without claiming margin eligibility."""
-        raw = requested.strip().upper().replace("/", "").replace("-", "").replace(" ", "")
+        raw = requested.strip().upper().replace("/", "").replace("-", "").replace(" ", "").replace(":USDT", "")
         if not raw:
             raise ValueError("نماد خالی است.")
         if raw.endswith("IRT"):
