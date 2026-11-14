@@ -352,8 +352,7 @@ async def add_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if runtime.storage is not None:
             runtime.storage.save_manual_symbols(runtime.manual_symbols)
         await _reply_temporary(update, context, 
-            f"✅ {symbol} به فهرست دستی اضافه شد. در اسکن بعدی بررسی می‌شود؛ "
-            "در اسکن بعدی بررسی می‌شود. فقط ارزهای فهرست دستی اسکن می‌شوند."
+            f"✅ {symbol} به فهرست دستی اضافه شد. فقط ارزهای فهرست دستی اسکن می‌شوند."
         )
     except Exception as exc:
         await _reply_temporary(update, context, f"❌ افزودن ارز انجام نشد: {exc}")
