@@ -318,11 +318,10 @@ async def pairs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized(update, context):
         return
     manual = sorted(runtime.manual_symbols)
-    automatic = [symbol for symbol in runtime.selected_symbols if symbol not in set(manual)]
     lines = [
         "📋 فهرست ارزهای ربات",
+        "حالت اسکن: فقط ارزهای دستی",
         f"ارزهای واجد شرایط فعلی اسکن: {len(runtime.selected_symbols)}",
-        f"انتخاب خودکار: {len(automatic)}",
         f"افزوده‌شده دستی: {len(manual)}",
         "",
         "ارزهای در حال اسکن:",
@@ -402,9 +401,9 @@ def _resolve_symbol(requested: str):
 async def auto_pairs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await _authorized(update, context):
         await _reply_temporary(update, context, 
-            f"انتخاب خودکار: فعال\nنمادهای واجد شرایط فعلی: {len(runtime.selected_symbols)}\n"
-            f"افزوده‌شده دستی: {len(runtime.manual_symbols)}\n"
-            "اسکنر فقط ارزهای دارای اردربلاک معتبر را نگه می‌دارد."
+            f"انتخاب خودکار: غیرفعال\nنمادهای دستی: {len(runtime.manual_symbols)}\n"
+            f"نمادهای واجد شرایط فعلی اسکن: {len(runtime.selected_symbols)}\n"
+            "فقط ارزهایی اسکن می‌شوند که خودت با /add اضافه کرده‌ای."
         )
 
 
