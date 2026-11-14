@@ -117,6 +117,8 @@ class SQLiteStore:
             return json.loads(row["value"]) if row else []
 
     def save_strategy_config(self, config: StrategyConfig) -> None:
+        # The user's Pine strategy requires a pullback after a trendline break.
+        config.require_trendline_pullback = True
         with self._connect() as db:
             db.execute(
                 "INSERT INTO scanner_settings(key, value) VALUES ('strategy_config', ?) "
@@ -138,7 +140,10 @@ class SQLiteStore:
                 if "ob_atr_len" not in values or "enable_trendline_signals" not in values:
                     return StrategyConfig()
                 allowed = set(StrategyConfig.__dataclass_fields__)
-                return StrategyConfig(**{key: value for key, value in values.items() if key in allowed})
+                values = {key: value for key, value in values.items() if key in allowed}
+                # Keep persisted settings consistent with the supplied Pine source.
+                values["require_trendline_pullback"] = True
+                return StrategyConfig(**values)
             except (TypeError, ValueError, json.JSONDecodeError):
                 return StrategyConfig()
 
