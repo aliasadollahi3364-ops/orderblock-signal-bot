@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from app.demo import Side
+from app.explosive_scanner import ExplosiveAlert, ExplosiveMoveScanner
 from app.market_data import MarketCandidate
 from app.runtime import runtime
 from app.strategy import Candle, OrderBlockStrategy, Signal, StrategyConfig
@@ -106,6 +107,7 @@ class AutomaticScanner:
         candidate_limit: int = 60,
         on_signal: Callable[[Signal], None] | None = None,
         on_trade_event: Callable[[dict], None] | None = None,
+        on_explosive_alert: Callable[[ExplosiveAlert], None] | None = None,
     ):
         if universe_limit < 1 or candidate_limit < 1:
             raise ValueError("Scanner limits must be positive.")
@@ -115,6 +117,11 @@ class AutomaticScanner:
         self.candidate_limit = candidate_limit
         self.on_signal = on_signal
         self.on_trade_event = on_trade_event
+        self.explosive_scanner = (
+            ExplosiveMoveScanner(market_data, on_alert=on_explosive_alert)
+            if callable(getattr(market_data, "fetch_trades", None))
+            and callable(getattr(market_data, "fetch_orderbook", None)) else None
+        )
         self._last_demo_bar: dict[str, int] = {}
         self._last_signal_bar: dict[str, int] = {}
         self._selected: list[str] = []
@@ -214,6 +221,11 @@ class AutomaticScanner:
             except Exception:
                 errors += 1
                 log.exception("Demo position management failed for %s", position.symbol)
+
+        if self.explosive_scanner is not None and runtime.manual_symbols:
+            # Independent alert engine: does not open demo positions or alter the
+            # user's existing OB/trendline strategy trade ledger.
+            self.explosive_scanner.scan_once(list(runtime.manual_symbols))
 
         self._selected = [market.symbol for market in selected_markets]
         runtime.selected_symbols = list(self._selected)
