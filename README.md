@@ -11,7 +11,7 @@ A Telegram-connected, web-managed **demo trading** bot for WEEX market data.
 
 ## Strategy source of truth
 
-The implementation follows the user's supplied Pine v6 strategy: confirmed 4H Order Blocks/BOS and two independent 15m entry methods (ORDER_BLOCK and TRENDLINE). The trendline method requires a valid break and, by default, a pullback/confirmation; direction is gated by the nearest active 4H OB touched by the signal candle. Both methods use the source's 4H SMA200 filters. Do not merge older bot strategies or add filters absent from the source script.
+The implementation follows the user's supplied Pine v6 strategy: confirmed 4H Order Blocks/BOS and two 15m entry methods. The ORDER_BLOCK path requires price to revisit a 4H OB, then a 15m CHoCH, retest and confirmation. The TRENDLINE path requires a valid 15m trendline break followed by a later pullback and confirmation; a breakout candle alone must never emit a signal. The trendline direction is gated by the nearest active 4H OB touched by the signal candle. Both methods use the source's 4H SMA200 filters. Do not merge older bot strategies or add filters absent from the source script.
 
 ## Demo trade management
 

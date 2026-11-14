@@ -1,4 +1,4 @@
-"""Closed-candle implementation of the supplied 4H OB + 15m OB/Trendline strategy."""
+"""Closed-candle implementation of the supplied 4H OB + 15m CHoCH/retest and trendline strategy."""
 from __future__ import annotations
 
 from collections import deque
@@ -169,13 +169,13 @@ class OrderBlockStrategy:
     def _pivot_high(bars: list[Candle], candidate: int, left: int, right: int) -> bool:
         if candidate-left < 0 or candidate+right >= len(bars): return False
         values = [b.high for b in bars[candidate-left:candidate+right+1]]
-        return bars[candidate].high == max(values) and values.count(bars[candidate].high) == 1
+        return bars[candidate].high == max(values)
 
     @staticmethod
     def _pivot_low(bars: list[Candle], candidate: int, left: int, right: int) -> bool:
         if candidate-left < 0 or candidate+right >= len(bars): return False
         values = [b.low for b in bars[candidate-left:candidate+right+1]]
-        return bars[candidate].low == min(values) and values.count(bars[candidate].low) == 1
+        return bars[candidate].low == min(values)
 
     def on_4h_close(self, candle: Candle) -> list[OrderBlock]:
         if self._last_4h_timestamp is not None and candle.timestamp <= self._last_4h_timestamp:
@@ -240,7 +240,7 @@ class OrderBlockStrategy:
         for ob in self.order_blocks:
             if not ob.active: continue
             if candle.low <= ob.top and candle.high >= ob.bottom:
-                distance = candle.close-ob.top if candle.close > ob.top else ob.bottom-candle.close if candle.close < ob.bottom else 0.0
+                distance = abs(candle.close-ob.top) if candle.close > ob.top else abs(ob.bottom-candle.close) if candle.close < ob.bottom else 0.0
                 if nearest_distance is None or distance < nearest_distance:
                     nearest_distance, nearest_direction = distance, ob.direction
         return nearest_direction
@@ -295,12 +295,12 @@ class OrderBlockStrategy:
         long_confirm = long_retest and candle.close > candle.open and candle.close > self._long_level
         short_confirm = short_retest and candle.close < candle.open and candle.close < self._short_level
         nearest_dir = self._nearest_touched_ob_direction(candle)
-        tl_long = (cfg.enable_trendline_signals and nearest_dir == 1 and
-                   (long_confirm if cfg.require_trendline_pullback else break_up) and
+        # The supplied Pine source requires a post-break pullback and confirmation.
+        # Never emit a trendline signal on the breakout candle alone.
+        tl_long = (cfg.enable_trendline_signals and nearest_dir == 1 and long_confirm and
                    (not cfg.use_sma200_trendline_filter or (sma is not None and candle.close > sma)) and
                    self._long_sl is not None and self._long_sl < candle.close)
-        tl_short = (cfg.enable_trendline_signals and nearest_dir == -1 and
-                    (short_confirm if cfg.require_trendline_pullback else break_down) and
+        tl_short = (cfg.enable_trendline_signals and nearest_dir == -1 and short_confirm and
                     (not cfg.use_sma200_trendline_filter or (sma is not None and candle.close < sma)) and
                     self._short_sl is not None and self._short_sl > candle.close)
 
@@ -335,14 +335,14 @@ class OrderBlockStrategy:
                 base = min(self.last_pl15, bottom) if cfg.use_ob_boundary_sl else self.last_pl15
                 stop = base-atr*cfg.sl_buffer_atr
                 if candle.close-stop >= cfg.min_tick:
-                    if cfg.use_sma200_filter and (sma is None or candle.close <= sma): return None
+                    if cfg.use_sma200_filter and (sma is None or candle.close <= sma): continue
                     ob.used = True
                     return Signal(self.symbol, "BUY", candle.timestamp, candle.close, stop, atr, ob.origin_time, top, bottom, self.trend4h, sma, "ORDER_BLOCK", cfg.risk_reward)
             if can_use and retest and direction == -1 and bear_dir and bear_power and self.last_ph15 is not None:
                 base = max(self.last_ph15, top) if cfg.use_ob_boundary_sl else self.last_ph15
                 stop = base+atr*cfg.sl_buffer_atr
                 if stop-candle.close >= cfg.min_tick:
-                    if cfg.use_sma200_filter and (sma is None or candle.close >= sma): return None
+                    if cfg.use_sma200_filter and (sma is None or candle.close >= sma): continue
                     ob.used = True
                     return Signal(self.symbol, "SELL", candle.timestamp, candle.close, stop, atr, ob.origin_time, top, bottom, self.trend4h, sma, "ORDER_BLOCK", cfg.risk_reward)
 

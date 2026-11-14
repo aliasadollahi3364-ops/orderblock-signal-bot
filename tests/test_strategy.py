@@ -99,17 +99,18 @@ def test_new_pine_defaults_match_supplied_source():
     assert cfg.use_trailing_stop is False
 
 
-def test_nearest_touched_ob_direction_includes_used_but_not_inactive_zones():
+def test_nearest_touched_ob_direction_uses_absolute_distance_and_skips_inactive_zones():
     from app.strategy import OrderBlock
 
     engine = OrderBlockStrategy("BTC/USDT")
     engine.order_blocks.extend([
-        OrderBlock(1, 105.0, 100.0, 1, used=True),
-        OrderBlock(-1, 112.0, 109.0, 2),
-        OrderBlock(1, 104.0, 101.0, 3, active=False),
+        OrderBlock(1, 100.0, 95.0, 1, used=True),
+        OrderBlock(-1, 112.0, 108.0, 2),
+        OrderBlock(-1, 104.0, 101.0, 3, active=False),
     ])
-    candle = bar(100, 108.0, 110.0, 103.0, 108.5)
-    assert engine._nearest_touched_ob_direction(candle) == -1
+    candle = bar(100, 100.0, 110.0, 99.0, 102.0)
+    # The bullish zone is 2 points away; the bearish zone is 6 points away.
+    assert engine._nearest_touched_ob_direction(candle) == 1
 
 
 def test_trendline_signal_configuration_is_independent_from_ob_trend_filter():
@@ -119,6 +120,18 @@ def test_trendline_signal_configuration_is_independent_from_ob_trend_filter():
     assert not cfg.use_trend_filter
     assert cfg.use_sma200_trendline_filter
 
+
+
+def test_saved_strategy_settings_cannot_disable_required_trendline_pullback(tmp_path):
+    path = str(tmp_path / "trendline-pullback.sqlite3")
+    store = SQLiteStore(path)
+    cfg = StrategyConfig(require_trendline_pullback=False)
+
+    store.save_strategy_config(cfg)
+    loaded = store.load_strategy_config()
+
+    assert loaded.require_trendline_pullback is True
+    assert cfg.require_trendline_pullback is False  # saving does not mutate caller state
 
 
 def test_legacy_saved_strategy_settings_reset_to_current_pine_defaults(tmp_path):
@@ -138,7 +151,7 @@ def test_legacy_saved_strategy_settings_reset_to_current_pine_defaults(tmp_path)
 
 
 
-def test_trendline_break_emits_distinct_trendline_signal_method():
+def test_trendline_break_waits_for_a_later_pullback_and_confirmation():
     from app.strategy import OrderBlock
 
     cfg = StrategyConfig(
@@ -147,7 +160,7 @@ def test_trendline_break_emits_distinct_trendline_signal_method():
         use_sma200_filter=False,
         enable_trendline_signals=True,
         use_sma200_trendline_filter=False,
-        require_trendline_pullback=False,
+        require_trendline_pullback=False,  # legacy saved value must not bypass Pine's pullback rule
     )
     engine = OrderBlockStrategy("BTC/USDT", cfg)
     engine.candles15.append(bar(1, 104.0, 105.0, 103.0, 104.0))
@@ -158,12 +171,14 @@ def test_trendline_break_emits_distinct_trendline_signal_method():
     engine.last_pl15 = 90.0
     engine.order_blocks.append(OrderBlock(1, 108.0, 100.0, 10))
 
-    signal = engine.on_15m_close(bar(2, 105.0, 107.0, 103.0, 106.0))
+    breakout = engine.on_15m_close(bar(2, 105.0, 107.0, 103.0, 106.0))
+    assert breakout is None  # breakout alone is not an entry
 
-    assert signal is not None
-    assert signal.method == "TRENDLINE"
-    assert signal.side == "BUY"
-    assert signal.stop < signal.entry
+    pullback = engine.on_15m_close(bar(3, 100.0, 101.0, 99.8, 100.8))
+    assert pullback is not None
+    assert pullback.method == "TRENDLINE"
+    assert pullback.side == "BUY"
+    assert pullback.stop < pullback.entry
 
 def test_unqualified_raw_bos_does_not_change_4h_trend():
     cfg = StrategyConfig(pivot4=1, body_len=2, ob_search=3, ob_atr_len=1)
