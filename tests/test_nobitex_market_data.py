@@ -33,19 +33,20 @@ def test_margin_market_list_keeps_both_directions_and_excludes_disabled():
     assert not markets[1].buy_enabled and markets[1].sell_enabled
 
 
-def test_resolve_manual_symbol_prefers_usdt_when_base_has_multiple_quotes():
+def test_resolve_manual_symbol_prefers_usdt_for_base_and_accepts_full_pair():
     client = adapter()
     client.fetch_margin_markets = lambda force=False: [
         type("Market", (), {"symbol": "BTCIRT", "base": "BTC", "quote": "IRT"})(),
         type("Market", (), {"symbol": "BTCUSDT", "base": "BTC", "quote": "USDT"})(),
     ]
     assert client.resolve_manual_symbol("btc").symbol == "BTCUSDT"
-    assert client.resolve_manual_symbol("BTC/IRT").symbol == "BTCUSDT" if False else True
+    assert client.resolve_manual_symbol("BTC/IRT").symbol == "BTCIRT"
 
 
 def test_fetch_ohlcv_converts_udf_seconds_to_ccxt_milliseconds():
     client = adapter()
     captured = {}
+
     def fake_get(path, params=None):
         captured.update(params or {})
         return {
@@ -54,6 +55,7 @@ def test_fetch_ohlcv_converts_udf_seconds_to_ccxt_milliseconds():
             "o": ["10", "11"], "h": ["12", "13"],
             "l": ["9", "10"], "c": ["11", "12"], "v": ["5", "6"],
         }
+
     client._get = fake_get
     rows = client.fetch_ohlcv("BTCUSDT", "15m", 2)
     assert rows == [
