@@ -1,4 +1,4 @@
-"""Two-stage WEEX scanner: rank the market universe, then evaluate confirmed OBs.
+"""Two-stage manual-symbol scanner: rank selected markets, then evaluate confirmed OBs.
 
 The scanner is deliberately demo-only. It fetches public candles, never exchange
 account data, and never submits orders.
@@ -34,7 +34,7 @@ class ScanSummary:
 def _to_candles(rows: list[list[float]]) -> list[Candle]:
     """Convert exchange OHLCV rows, ignoring malformed or invalid candles.
 
-    Some WEEX markets can return zero, non-finite, or internally inconsistent
+    Some Exchange markets can return zero, non-finite, or internally inconsistent
     OHLC values. One bad row must not abort screening for an entire symbol.
     """
     result = []
@@ -133,7 +133,7 @@ class AutomaticScanner:
                 manual_markets.append(self.market_data.resolve_manual_symbol(requested))
             except Exception:
                 errors += 1
-                log.warning("Manual symbol unavailable on WEEX: %s", requested)
+                log.warning("Manual symbol unavailable on configured exchange: %s", requested)
         markets = manual_markets
 
         ob_ranked: list[tuple[float, MarketCandidate]] = []
