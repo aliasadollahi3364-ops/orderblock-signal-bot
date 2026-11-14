@@ -191,3 +191,42 @@ def test_unqualified_raw_bos_does_not_change_4h_trend():
 
     assert created == []
     assert engine.trend4h == 0
+
+
+def test_trendline_entry_requires_touching_an_active_bullish_order_block():
+    cfg = StrategyConfig(
+        atr_len=1, use_trend_filter=False, use_sma200_filter=False,
+        enable_trendline_signals=True, use_sma200_trendline_filter=False,
+        require_trendline_pullback=True,
+    )
+    engine = OrderBlockStrategy("BTC/USDT", cfg)
+    engine.candles15.append(bar(1, 104.0, 105.0, 103.0, 104.0))
+    engine._last_15m_timestamp = 1
+    engine._tr15.append(2.0)
+    engine.prev_ph15, engine.prev_ph15_bar = 110.0, -1
+    engine.last_ph15, engine.last_ph15_bar = 105.0, 0
+    engine.last_pl15 = 90.0
+
+    assert engine.on_15m_close(bar(2, 105.0, 107.0, 103.0, 106.0)) is None
+    assert engine.on_15m_close(bar(3, 100.0, 101.0, 99.8, 100.8)) is None
+
+
+def test_trendline_long_is_blocked_when_touched_order_block_is_bearish():
+    from app.strategy import OrderBlock
+
+    cfg = StrategyConfig(
+        atr_len=1, use_trend_filter=False, use_sma200_filter=False,
+        enable_trendline_signals=True, use_sma200_trendline_filter=False,
+        require_trendline_pullback=True,
+    )
+    engine = OrderBlockStrategy("BTC/USDT", cfg)
+    engine.candles15.append(bar(1, 104.0, 105.0, 103.0, 104.0))
+    engine._last_15m_timestamp = 1
+    engine._tr15.append(2.0)
+    engine.prev_ph15, engine.prev_ph15_bar = 110.0, -1
+    engine.last_ph15, engine.last_ph15_bar = 105.0, 0
+    engine.last_pl15 = 90.0
+    engine.order_blocks.append(OrderBlock(-1, 108.0, 100.0, 10))
+
+    assert engine.on_15m_close(bar(2, 105.0, 107.0, 103.0, 106.0)) is None
+    assert engine.on_15m_close(bar(3, 100.0, 101.0, 99.8, 100.8)) is None
