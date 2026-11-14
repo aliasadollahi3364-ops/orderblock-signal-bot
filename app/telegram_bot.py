@@ -353,9 +353,7 @@ async def add_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             runtime.storage.save_manual_symbols(runtime.manual_symbols)
         await _reply_temporary(update, context, 
             f"✅ {symbol} به فهرست دستی اضافه شد. در اسکن بعدی بررسی می‌شود؛ "
-            "فقط در صورت داشتن اردربلاک معتبر وارد اسکن ۱۵ دقیقه‌ای خواهد شد.\n"
-            "نکته: بدون توکن نوبیتکس، فعال‌بودن این نماد در بازار تعهدی از API قابل تأیید نیست؛ "
-            "فقط نمادی را اضافه کن که خودت در بخش تعهدی نوبیتکس بررسی کرده‌ای."
+            "در اسکن بعدی بررسی می‌شود. فقط ارزهای فهرست دستی اسکن می‌شوند."
         )
     except Exception as exc:
         await _reply_temporary(update, context, f"❌ افزودن ارز انجام نشد: {exc}")
@@ -410,7 +408,7 @@ def _resolve_symbol(requested: str):
 async def auto_pairs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await _authorized(update, context):
         await _reply_temporary(update, context, 
-            f"انتخاب خودکار: غیرفعال\nنمادهای دستی: {len(runtime.manual_symbols)}\n"
+            f"افزودن خودکار ارزها: غیرفعال\nنمادهای دستی: {len(runtime.manual_symbols)}\n"
             f"نمادهای واجد شرایط فعلی اسکن: {len(runtime.selected_symbols)}\n"
             "فقط ارزهایی اسکن می‌شوند که خودت با /add اضافه کرده‌ای."
         )
