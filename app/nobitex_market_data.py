@@ -133,9 +133,10 @@ class NobitexMarketData:
         raw = requested.strip().upper().replace("/", "").replace("-", "").replace(" ", "")
         if not raw:
             raise ValueError("نماد خالی است.")
-        if not raw.endswith(("USDT", "IRT")):
-            # A base-only entry prefers USDT, then IRT.
-            candidates = [raw + "USDT", raw + "IRT"]
+        if raw.endswith("IRT"):
+            raise ValueError("حساب دمو فعلی بر پایه USDT است؛ فعلاً فقط بازارهای USDT را اضافه کن.")
+        if not raw.endswith("USDT"):
+            candidates = [raw + "USDT"]
         else:
             candidates = [raw]
         stats = self.fetch_market_stats()
