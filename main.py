@@ -9,6 +9,7 @@ from app.api import app
 from app.charting import make_signal_chart
 from app.config import Settings
 from app.demo import DemoAccount
+from app.explosive_scanner import ExplosiveAlert
 from app.market_data import WeexMarketData
 from app.nobitex_market_data import NobitexMarketData
 from app.runtime import runtime
@@ -84,6 +85,20 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
             runtime.persist_demo_state()
             if bot is not None:
                 asyncio.run_coroutine_threadsafe(send_signal_photo(signal, position), loop)
+    def handle_explosive_alert(alert: ExplosiveAlert) -> None:
+        stage = "🚨 هشدار اولیه حرکت انفجاری" if alert.stage == "EARLY" else "🔥 تأیید حرکت انفجاری"
+        side = "لانگ" if alert.side == "BUY" else "شورت"
+        reasons = "\n".join(f"• {reason}" for reason in alert.reasons)
+        timestamp = datetime.fromtimestamp(alert.timestamp / 1000, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        send(
+            f"{stage} | {alert.symbol}\nجهت: {side} | امتیاز: {alert.score}/100\n"
+            f"ورود آزمایشی: {alert.entry:g}\nحدضرر: {alert.stop:g}\n"
+            f"TP1: {alert.tp1:g}\nTP2: {alert.tp2:g}\nTP3: {alert.tp3:g}\n"
+            f"زمان: {timestamp}\nدلایل:\n{reasons}\n"
+            "این موتور مستقل و فقط هشداردهنده است؛ معامله دمو باز نمی‌کند. "
+            "بدون توکن، مجازبودن جهت لانگ/شورت تعهدی از API تأیید نشده است."
+        )
+
     def handle_trade_event(event: dict) -> None:
         """Keep TP/SL milestone notifications permanently in Telegram."""
         if bot is None:
@@ -115,7 +130,8 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
 
     scanner = AutomaticScanner(market_data=market_data, strategy_config=runtime.strategy_config,
         universe_limit=settings.scanner_universe_limit, candidate_limit=settings.scanner_candidate_limit,
-        on_signal=handle_signal, on_trade_event=handle_trade_event)
+        on_signal=handle_signal, on_trade_event=handle_trade_event,
+        on_explosive_alert=handle_explosive_alert)
     try:
         await asyncio.to_thread(scanner.run_forever, settings.scan_interval_seconds)
     finally:
