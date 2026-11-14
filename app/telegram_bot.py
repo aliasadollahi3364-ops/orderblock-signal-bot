@@ -376,9 +376,16 @@ async def remove_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
     else:
         base = requested[:-4] if requested.endswith("USDT") and len(requested) > 4 else requested
+    def base_of(symbol: str) -> str:
+        value = symbol.strip().upper().replace("-", "")
+        if "/" in value:
+            return value.split("/", 1)[0]
+        if value.endswith("USDT"):
+            return value[:-4]
+        return value
+
     matched = next(
-        (symbol for symbol in runtime.manual_symbols
-         if symbol.split("/", 1)[0].upper() == base),
+        (symbol for symbol in runtime.manual_symbols if base_of(symbol) == base),
         None,
     )
     if matched is None:
