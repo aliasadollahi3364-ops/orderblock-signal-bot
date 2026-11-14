@@ -1,5 +1,5 @@
 from app.explosive_scanner import (
-    _book_ratio, _closed_candles, _compression, _trade_buy_ratio,
+    _book_ratio, _closed_candles, _compression, _trade_buy_ratio, _trade_poc,
 )
 
 
@@ -38,3 +38,13 @@ def test_compression_requires_recent_range_contraction():
     contracting = [Bar(110, 90) for _ in range(22)] + [Bar(103, 97) for _ in range(8)]
     assert not _compression(expanding)
     assert _compression(contracting)
+
+def test_trade_volume_profile_returns_highest_volume_price_bucket():
+    trades = [
+        {"price": "100", "volume": "1", "type": "buy"},
+        {"price": "100.05", "volume": "8", "type": "buy"},
+        {"price": "101", "volume": "2", "type": "sell"},
+    ]
+    poc = _trade_poc(trades)
+    assert poc is not None
+    assert abs(poc - 100.05) < 0.5
