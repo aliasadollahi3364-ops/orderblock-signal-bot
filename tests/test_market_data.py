@@ -96,3 +96,9 @@ def test_weex_public_trade_and_orderbook_data_are_normalized_and_cached(monkeypa
     assert book == {"bids": [[10, 5], [9, 2]], "asks": [[11, 3]]}
     assert instance.fetch_orderbook("BTC/USDT:USDT") == book
     assert instance.exchange.book_calls == 1
+
+
+def test_weex_adapter_exposes_no_exchange_wide_market_discovery():
+    from app.market_data import WeexMarketData
+
+    assert not hasattr(WeexMarketData, "fetch_usdt_perpetuals")
