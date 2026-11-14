@@ -35,12 +35,14 @@ def test_margin_market_list_keeps_both_directions_and_excludes_disabled():
 
 def test_resolve_manual_symbol_prefers_usdt_for_base_and_accepts_full_pair():
     client = adapter()
-    client.fetch_margin_markets = lambda force=False: [
-        type("Market", (), {"symbol": "BTCIRT", "base": "BTC", "quote": "IRT"})(),
-        type("Market", (), {"symbol": "BTCUSDT", "base": "BTC", "quote": "USDT"})(),
-    ]
+    client.fetch_market_stats = lambda force=False: {
+        "btc-rls": {"isClosed": False, "latest": "64000", "volumeDst": "500000",
+                    "bestBuy": "63990", "bestSell": "64010"},
+        "btc-usdt": {"isClosed": False, "latest": "65000", "volumeDst": "1000000",
+                     "bestBuy": "64990", "bestSell": "65010"},
+    }
     assert client.resolve_manual_symbol("btc").symbol == "BTCUSDT"
-    assert client.resolve_manual_symbol("BTC/IRT").symbol == "BTCIRT"
+    assert client.resolve_manual_symbol("BTC/USDT").symbol == "BTCUSDT"
 
 
 def test_fetch_ohlcv_converts_udf_seconds_to_ccxt_milliseconds():
