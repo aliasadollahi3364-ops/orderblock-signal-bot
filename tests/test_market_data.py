@@ -28,8 +28,8 @@ def _market_data_for_manual_symbol(monkeypatch):
             "linear": True,
         }
     }
-    monkeypatch.setattr(instance, "_fetch_tickers_cached", lambda: {
-        "SPCX/USDT:USDT": {"last": 1.25, "quoteVolume": 50000}
+    monkeypatch.setattr(instance, "_fetch_ticker_cached", lambda symbol: {
+        "last": 1.25, "quoteVolume": 50000
     })
     return instance
 
