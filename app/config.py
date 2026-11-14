@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     port: int = Field(default=8000, ge=1, le=65535)
 
     def assert_demo_only(self) -> None:
+        if self.exchange_id.lower() != "weex":
+            raise RuntimeError("Only the WEEX public market-data adapter is supported in this bot.")
         if self.live_trading_enabled:
             raise RuntimeError(
                 "LIVE_TRADING_ENABLED=true is prohibited: this application is demo-only."
