@@ -282,7 +282,7 @@ class ExplosiveMoveScanner:
         for symbol in list(dict.fromkeys(symbols)):
             try:
                 bars = {
-                    tf: _closed_candles(self.market_data.fetch_ohlcv(symbol, tf, 120), tf, now_ms)
+                    tf: _closed_candles(self.market_data.fetch_ohlcv(symbol, tf, 220 if tf == "4h" else 320 if tf == "15m" else 120), tf, now_ms)
                     for tf in ("4h", "1h", "15m", "5m")
                 }
                 if any(len(bars[tf]) < 30 for tf in bars):
@@ -297,7 +297,6 @@ class ExplosiveMoveScanner:
                         continue
                     key = (symbol, side)
                     previous = self._state.get(key)
-                    rank = 2 if alert.stage == "CONFIRMED" else 1
                     if previous and (previous[0] == "CONFIRMED" or
                                      (previous[0] == alert.stage and previous[1] == alert.timestamp)):
                         continue
