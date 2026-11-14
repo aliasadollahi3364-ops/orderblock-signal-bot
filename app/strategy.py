@@ -204,9 +204,9 @@ class OrderBlockStrategy:
         bull_bos = self.last_ph4 is not None and previous_close is not None and candle.close > self.last_ph4 and previous_close <= self.last_ph4
         bear_bos = self.last_pl4 is not None and previous_close is not None and candle.close < self.last_pl4 and previous_close >= self.last_pl4
         created: list[OrderBlock] = []
-        if bull_bos: self.trend4h = 1
-        if bear_bos: self.trend4h = -1
         if strong_body and atr4 is not None and bull_bos and candle.close > candle.open and candle.close-self.last_ph4 >= atr4*self.cfg.min_break_atr:
+            # Match Pine: update the 4H trend only on a qualified BOS, not a raw pivot break.
+            self.trend4h = 1
             found = next((j for j in range(idx-1, max(-1, idx-self.cfg.ob_search-1), -1) if bars[j].close < bars[j].open), None)
             if found is not None:
                 source = bars[found]
@@ -214,6 +214,8 @@ class OrderBlockStrategy:
                 if source_atr is not None and 0 < source.high-source.low <= source_atr*self.cfg.max_ob_candle_range_atr:
                     created.append(OrderBlock(1, source.high, source.low, source.timestamp))
         if strong_body and atr4 is not None and bear_bos and candle.close < candle.open and self.last_pl4-candle.close >= atr4*self.cfg.min_break_atr:
+            # Match Pine: update the 4H trend only on a qualified BOS, not a raw pivot break.
+            self.trend4h = -1
             found = next((j for j in range(idx-1, max(-1, idx-self.cfg.ob_search-1), -1) if bars[j].close > bars[j].open), None)
             if found is not None:
                 source = bars[found]
