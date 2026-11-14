@@ -125,21 +125,16 @@ class AutomaticScanner:
         errors = 0
         # Read the latest persisted Telegram settings once per scan cycle.
         strategy_config = runtime.strategy_config or self.strategy_config
-        try:
-            markets = self.market_data.fetch_usdt_perpetuals(self.universe_limit)
-        except Exception:
-            runtime.scanner_state = "MARKET_DATA_ERROR"
-            log.exception("Failed to load WEEX USDT perpetual universe")
-            return ScanSummary(0, 0, 0, 0, 1)
-
+        # Manual-only mode: never download or select the exchange-wide market universe.
+        # The scanner evaluates only symbols explicitly saved through Telegram /add.
         manual_markets: list[MarketCandidate] = []
         for requested in list(runtime.manual_symbols):
             try:
                 manual_markets.append(self.market_data.resolve_manual_symbol(requested))
             except Exception:
+                errors += 1
                 log.warning("Manual symbol unavailable on WEEX: %s", requested)
-        known = {item.symbol for item in markets}
-        markets.extend(item for item in manual_markets if item.symbol not in known)
+        markets = manual_markets
 
         ob_ranked: list[tuple[float, MarketCandidate]] = []
         market_cache: dict[str, tuple[list[Candle], list[Candle], float]] = {}
@@ -167,14 +162,9 @@ class AutomaticScanner:
                 log.exception("4h OB screening failed for %s", market.symbol)
 
         ob_ranked.sort(key=lambda item: item[0], reverse=True)
-        automatic_markets = [market for _, market in ob_ranked[:self.candidate_limit]]
-        qualified_manual = {market.symbol for _, market in ob_ranked
-                            if market.symbol in set(runtime.manual_symbols)}
-        selected_by_symbol = {market.symbol: market for market in automatic_markets}
-        for market in manual_markets:
-            if market.symbol in qualified_manual:
-                selected_by_symbol[market.symbol] = market
-        selected_markets = list(selected_by_symbol.values())
+        # Only manually added symbols with an active, unused 4H order block
+        # proceed to 15m signal evaluation. No automatic candidates are added.
+        selected_markets = [market for _, market in ob_ranked]
         signals: list[Signal] = []
         runtime.scanner_state = "SCANNING_15M"
         for market in selected_markets:
