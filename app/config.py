@@ -8,7 +8,7 @@ class Settings(BaseSettings):
 
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
-    exchange_id: str = "weex"
+    exchange_id: str = "nobitex"
     quote_currency: str = "USDT"
     nobitex_api_token: str = ""
     timeframe_entry: str = "15m"
