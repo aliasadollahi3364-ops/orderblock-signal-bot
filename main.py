@@ -46,22 +46,6 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
         if bot is not None:
             future = asyncio.run_coroutine_threadsafe(bot.send_message(chat_id=settings.telegram_chat_id, text=text), loop)
             future.add_done_callback(lambda result: logger.error("Telegram notification failed: %s", result.exception()) if result.exception() else None)
-    async def send_temporary_notification(text: str) -> None:
-        """Send non-signal trade notifications and remove them after the shared TTL."""
-        if bot is None:
-            return
-        try:
-            message = await bot.send_message(chat_id=settings.telegram_chat_id, text=text)
-            async def delete_notification() -> None:
-                await asyncio.sleep(120)
-                try:
-                    await bot.delete_message(chat_id=message.chat_id, message_id=message.message_id)
-                except Exception:
-                    logger.exception("Could not delete temporary Telegram notification %s", message.message_id)
-            asyncio.create_task(delete_notification())
-        except Exception:
-            logger.exception("Could not send temporary Telegram notification")
-
     async def send_signal_photo(signal: Signal, position) -> None:
         if bot is None: return
         try:
@@ -97,11 +81,34 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
             if bot is not None:
                 asyncio.run_coroutine_threadsafe(send_signal_photo(signal, position), loop)
     def handle_trade_event(event: dict) -> None:
-        if bot is not None:
-            text = (f"🔔 رویداد معامله دمو | {event['symbol']}\nوضعیت: {event['type']}\n"
-                    f"قیمت خروج/رویداد: {event['price']:g}\nزمان خروج/رویداد: {event['time']}\n"
-                    f"سود/زیان تحقق‌یافته: {event['realized_pnl']:+.4f} USDT\nمعاملات واقعی: خاموش")
-            asyncio.run_coroutine_threadsafe(send_temporary_notification(text), loop)
+        """Keep TP/SL milestone notifications permanently in Telegram."""
+        if bot is None:
+            return
+        event_labels = {
+            "TP1": "🎯 هدف اول (TP1) زده شد",
+            "TP2": "🎯 هدف دوم (TP2) زده شد",
+            "TP3": "🏁 هدف سوم (TP3) زده شد؛ معامله کامل بسته شد",
+            "STOP": "🛑 حد ضرر (SL) فعال شد؛ معامله بسته شد",
+            "BREAK_EVEN_STOP": "⚖️ حد سربه‌سر فعال شد؛ معامله بسته شد",
+            "TP1_TRAILING_STOP": "🔒 حد محافظتی بعد از TP2 فعال شد؛ معامله بسته شد",
+        }
+        label = event_labels.get(str(event.get("type")), f"رویداد معامله: {event.get('type')}")
+        text = (
+            f"{label} | {event['symbol']}\\n"
+            f"جهت: {event.get('side', 'نامشخص')}\\n"
+            f"قیمت رویداد: {event['price']:g}\\n"
+            f"زمان: {event['time']}\\n"
+            f"سود/زیان تحقق‌یافته تا این لحظه: {event['realized_pnl']:+.4f} USDT\\n"
+            "حساب دمو | معاملات واقعی: خاموش"
+        )
+        future = asyncio.run_coroutine_threadsafe(
+            bot.send_message(chat_id=settings.telegram_chat_id, text=text), loop
+        )
+        future.add_done_callback(
+            lambda result: logger.error("Could not send persistent trade event: %s", result.exception())
+            if result.exception() else None
+        )
+
     scanner = AutomaticScanner(market_data=market_data, strategy_config=runtime.strategy_config,
         universe_limit=settings.scanner_universe_limit, candidate_limit=settings.scanner_candidate_limit,
         on_signal=handle_signal, on_trade_event=handle_trade_event)
