@@ -164,3 +164,15 @@ def test_trendline_break_emits_distinct_trendline_signal_method():
     assert signal.method == "TRENDLINE"
     assert signal.side == "BUY"
     assert signal.stop < signal.entry
+
+def test_unqualified_raw_bos_does_not_change_4h_trend():
+    cfg = StrategyConfig(pivot4=1, body_len=2, ob_search=3, ob_atr_len=1)
+    engine = OrderBlockStrategy("BTC/USDT", cfg)
+
+    engine.on_4h_close(bar(1, 10, 11, 8, 9))
+    engine.on_4h_close(bar(2, 9, 12, 8.5, 10))
+    engine.on_4h_close(bar(3, 10, 11, 9, 10.5))  # confirms pivot high at 12
+    created = engine.on_4h_close(bar(4, 12.0, 12.2, 11.9, 12.1))  # weak raw break
+
+    assert created == []
+    assert engine.trend4h == 0
