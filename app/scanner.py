@@ -10,10 +10,10 @@ import math
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Callable
+from typing import Any, Callable
 
 from app.demo import Side
-from app.market_data import MarketCandidate, WeexMarketData
+from app.market_data import MarketCandidate
 from app.runtime import runtime
 from app.strategy import Candle, OrderBlockStrategy, Signal, StrategyConfig
 
@@ -100,7 +100,7 @@ def _active_ob_distance(engine: OrderBlockStrategy, price: float) -> float | Non
 class AutomaticScanner:
     def __init__(
         self,
-        market_data: WeexMarketData,
+        market_data: Any,
         strategy_config: StrategyConfig | None = None,
         universe_limit: int = 500,
         candidate_limit: int = 60,
