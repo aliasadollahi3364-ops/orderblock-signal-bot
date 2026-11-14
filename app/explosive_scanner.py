@@ -8,6 +8,8 @@ from __future__ import annotations
 import logging
 import math
 import time
+from collections import defaultdict
+from statistics import median
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -107,6 +109,27 @@ def _book_ratio(book: dict[str, Any]) -> float | None:
         return bids / asks if asks > 0 else None
     except (TypeError, ValueError, IndexError):
         return None
+
+def _trade_poc(trades: list[dict[str, Any]]) -> float | None:
+    """Approximate point of control from the latest public trade sample."""
+    parsed = []
+    for trade in trades:
+        try:
+            price = float(trade.get("price") or 0)
+            volume = float(trade.get("volume") or 0)
+            if price > 0 and volume > 0 and math.isfinite(price) and math.isfinite(volume):
+                parsed.append((price, volume))
+        except (TypeError, ValueError):
+            continue
+    if not parsed:
+        return None
+    step = median([price for price, _ in parsed]) * 0.002
+    if step <= 0:
+        return None
+    buckets: dict[int, float] = defaultdict(float)
+    for price, volume in parsed:
+        buckets[round(price / step)] += volume
+    return max(buckets.items(), key=lambda item: item[1])[0] * step
 
 
 def _ob_for_side(bars4: list[Candle], side: str, price: float) -> tuple[bool, float | None, float | None]:
@@ -216,9 +239,11 @@ class ExplosiveMoveScanner:
         compressed = _compression(bars1h)
         volume_ok = _volume_spike(bars15)
         ratio, book_ratio = _trade_buy_ratio(trades), _book_ratio(book)
+        poc = _trade_poc(trades)
         trade_flow_ok = ratio is not None and (ratio >= 0.62 if side == "BUY" else ratio <= 0.38)
         book_flow_ok = book_ratio is not None and (book_ratio >= 1.20 if side == "BUY" else book_ratio <= 0.83)
-        flow_score = (10 if trade_flow_ok else 0) + (5 if book_flow_ok else 0)
+        poc_ok = poc is not None and (last.close >= poc if side == "BUY" else last.close <= poc)
+        flow_score = (8 if trade_flow_ok else 0) + (4 if book_flow_ok else 0) + (3 if poc_ok else 0)
         ob_ok, ob_top, ob_bottom = _ob_for_side(bars4, side, last.close)
         sweep_ok = _sweep(bars15, side)
         choch_ok = _choch(bars15, side)
@@ -240,7 +265,7 @@ class ExplosiveMoveScanner:
         near_break = (last.close >= prior_high * 0.995) if side == "BUY" else (last.close <= prior_low * 1.005)
         early = score >= 75 and compressed and volume_ok and trade_flow_ok and ob_ok and near_break
         confirmed = (
-            score >= 85 and volume_ok and trade_flow_ok and book_flow_ok and ob_ok
+            score >= 85 and volume_ok and trade_flow_ok and book_flow_ok and poc_ok and ob_ok
             and choch_ok and retest_ok and _five_minute_timing(bars5, side)
         )
         if not early and not confirmed:
@@ -268,6 +293,7 @@ class ExplosiveMoveScanner:
         if volume_ok: reasons.append("افزایش حجم غیرعادی ۱۵دقیقه")
         if trade_flow_ok: reasons.append(f"غلبه معاملات {'خرید' if side == 'BUY' else 'فروش'} ({ratio:.0%})")
         if book_flow_ok: reasons.append("عدم‌تعادل همسو در اردربوک")
+        if poc_ok: reasons.append("قرارگیری قیمت در سمت همسو با POC حجم معاملات اخیر")
         if ob_ok: reasons.append("اردربلاک معتبر هم‌جهت ۴ساعته")
         if sweep_ok: reasons.append("جمع‌آوری نقدینگی")
         if choch_ok: reasons.append("شکست ساختار/CHoCH")
