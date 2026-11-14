@@ -1,4 +1,4 @@
-"""Closed-candle implementation of the supplied 4H OB + 15m OB/Trendline strategy."""
+"""Closed-candle implementation of the supplied 4H OB + 15m CHoCH/retest and trendline strategy."""
 from __future__ import annotations
 
 from collections import deque
