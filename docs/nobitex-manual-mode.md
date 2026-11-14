@@ -29,3 +29,20 @@ The existing `OrderBlockStrategy` is not replaced:
 
 The Nobitex adapter and scanner wiring are on the
 `nobitex-margin-expansion` branch only. This is not a deployment instruction.
+
+## Independent explosive-move alerts
+
+The separate alert engine checks closed 4H, 1H, 15m and 5m candles, public
+trade aggressor volumes and the top levels of the public order book. It scores
+compression, relative volume, approximate trade-flow/CVD, a same-direction 4H
+order block, liquidity sweep, CHoCH, breakout/retest and 1H trend strength.
+The proposed thresholds are an early warning at 75/100 and a confirmed alert
+at 85/100 with volume, trade-flow, order-book, OB, CHoCH, retest and 5m timing
+gates. Repeated early warnings are suppressed for four hours; a confirmed
+alert upgrades an earlier warning.
+
+These scores are heuristic filters, not probabilities or guarantees of a pump.
+The engine is alert-only: it does not open demo positions and cannot place live
+orders. Since tokenless mode cannot verify margin direction permissions, check
+that the selected market and the alerted LONG/SHORT direction are enabled in
+your Nobitex margin account before acting on any alert.
