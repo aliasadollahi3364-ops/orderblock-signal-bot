@@ -42,6 +42,8 @@ class WeexMarketData:
         self._markets: dict[str, dict[str, Any]] | None = None
         self._ticker_cache: tuple[float, dict[str, Any]] | None = None
         self._ohlcv_cache: dict[tuple[str, str, int], tuple[float, list[list[float]]]] = {}
+        self._trades_cache: dict[tuple[str, int], tuple[float, list[dict[str, Any]]]] = {}
+        self._orderbook_cache: dict[tuple[str, int], tuple[float, dict[str, Any]]] = {}
 
     def load_markets(self) -> dict[str, dict[str, Any]]:
         if self._markets is None:
@@ -159,6 +161,52 @@ class WeexMarketData:
         ttl = 900.0 if timeframe == "4h" else 60.0 if timeframe == "15m" else 15.0
         self._ohlcv_cache[key] = (now + ttl, rows)
         return [row[:] for row in rows]
+
+
+    def fetch_trades(self, symbol: str, limit: int = 100) -> list[dict[str, Any]]:
+        """Return normalized public recent trades for the alert-only scanner."""
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        self.load_markets()
+        key = (symbol, limit)
+        now = time.monotonic()
+        cached = self._trades_cache.get(key)
+        if cached and now < cached[0]:
+            return [trade.copy() for trade in cached[1]]
+        raw_trades = self.exchange.fetch_trades(symbol, limit=limit)
+        trades = []
+        for trade in raw_trades:
+            side = str(trade.get("side") or "").lower()
+            try:
+                volume = float(trade.get("amount") or 0)
+                price = float(trade.get("price") or 0)
+            except (TypeError, ValueError):
+                continue
+            if side not in {"buy", "sell"} or volume <= 0 or price <= 0:
+                continue
+            trades.append({"type": side, "volume": volume, "price": price})
+        self._trades_cache[key] = (now + 10.0, trades)
+        return [trade.copy() for trade in trades]
+
+    def fetch_orderbook(self, symbol: str, limit: int = 20) -> dict[str, Any]:
+        """Return a cached public order-book snapshot; never places or changes orders."""
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        self.load_markets()
+        key = (symbol, limit)
+        now = time.monotonic()
+        cached = self._orderbook_cache.get(key)
+        if cached and now < cached[0]:
+            return {"bids": [level[:] for level in cached[1].get("bids", [])],
+                    "asks": [level[:] for level in cached[1].get("asks", [])]}
+        book = self.exchange.fetch_order_book(symbol, limit=limit)
+        normalized = {
+            "bids": [list(level[:2]) for level in book.get("bids", []) if len(level) >= 2],
+            "asks": [list(level[:2]) for level in book.get("asks", []) if len(level) >= 2],
+        }
+        self._orderbook_cache[key] = (now + 5.0, normalized)
+        return {"bids": [level[:] for level in normalized["bids"]],
+                "asks": [level[:] for level in normalized["asks"]]}
 
     def close(self) -> None:
         close = getattr(self.exchange, "close", None)
