@@ -52,7 +52,7 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
             rows = await asyncio.to_thread(market_data.fetch_ohlcv, signal.symbol, "15m", 80)
             chart = make_signal_chart(rows, signal.symbol, signal.side, signal.entry, signal.stop, position.tp1, position.tp2, position.tp3)
             entry_time = datetime.fromtimestamp((signal.timestamp + 15*60*1000)/1000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-            method = "اردربلاک ۱۵ دقیقه‌ای" if signal.method == "ORDER_BLOCK" else "شکست و پولبک خط روند ۱۵ دقیقه‌ای"
+            method = "برخورد به اردربلاک ۴ساعته + تغییر روند و پولبک ۱۵دقیقه‌ای" if signal.method == "ORDER_BLOCK" else "شکست و پولبک خط روند ۱۵دقیقه‌ای"
             caption = (
                 f"📣 سیگنال جدید دمو | {signal.symbol}\nروش ورود: {method}\n"
                 "تایم‌فریم صدور سیگنال: ۱۵ دقیقه | روند و محدوده مرجع: اردربلاک ۴ ساعته\n"
