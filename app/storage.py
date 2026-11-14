@@ -118,12 +118,13 @@ class SQLiteStore:
 
     def save_strategy_config(self, config: StrategyConfig) -> None:
         # The user's Pine strategy requires a pullback after a trendline break.
-        config.require_trendline_pullback = True
+        values = asdict(config)
+        values["require_trendline_pullback"] = True
         with self._connect() as db:
             db.execute(
                 "INSERT INTO scanner_settings(key, value) VALUES ('strategy_config', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                (json.dumps(asdict(config), separators=(",", ":")),),
+                (json.dumps(values, separators=(",", ":")),),
             )
 
     def load_strategy_config(self) -> StrategyConfig:
