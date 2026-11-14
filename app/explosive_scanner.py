@@ -297,9 +297,13 @@ class ExplosiveMoveScanner:
                         continue
                     key = (symbol, side)
                     previous = self._state.get(key)
-                    if previous and (previous[0] == "CONFIRMED" or
-                                     (previous[0] == alert.stage and previous[1] == alert.timestamp)):
-                        continue
+                    if previous:
+                        if previous[0] == "CONFIRMED":
+                            continue
+                        if previous[0] == "EARLY" and alert.stage == "EARLY" and (
+                            alert.timestamp - previous[1] < 4 * 60 * 60 * 1000
+                        ):
+                            continue
                     self._state[key] = (alert.stage, alert.timestamp)
                     alerts.append(alert)
                     if self.on_alert:
