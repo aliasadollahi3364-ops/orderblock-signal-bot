@@ -53,3 +53,46 @@ def test_manual_symbol_rejects_inactive_or_non_swap_market(monkeypatch):
     instance._markets["SPCX/USDT:USDT"]["active"] = False
     with pytest.raises(ValueError, match="قرارداد دائمی"):
         instance.resolve_manual_symbol("SPCX")
+
+
+def test_weex_public_trade_and_orderbook_data_are_normalized_and_cached(monkeypatch):
+    from app.market_data import WeexMarketData
+
+    class FakeExchange:
+        def __init__(self):
+            self.trade_calls = 0
+            self.book_calls = 0
+
+        def load_markets(self):
+            return {}
+
+        def fetch_trades(self, symbol, limit):
+            self.trade_calls += 1
+            return [
+                {"side": "buy", "amount": 2, "price": 10},
+                {"side": "sell", "amount": 1, "price": 11},
+                {"side": None, "amount": 4, "price": 12},
+            ]
+
+        def fetch_order_book(self, symbol, limit):
+            self.book_calls += 1
+            return {"bids": [[10, 5], [9, 2]], "asks": [[11, 3]]}
+
+    instance = WeexMarketData.__new__(WeexMarketData)
+    instance._markets = {}
+    instance._trades_cache = {}
+    instance._orderbook_cache = {}
+    instance.exchange = FakeExchange()
+
+    trades = instance.fetch_trades("BTC/USDT:USDT")
+    assert trades == [
+        {"type": "buy", "volume": 2.0, "price": 10.0},
+        {"type": "sell", "volume": 1.0, "price": 11.0},
+    ]
+    assert instance.fetch_trades("BTC/USDT:USDT") == trades
+    assert instance.exchange.trade_calls == 1
+
+    book = instance.fetch_orderbook("BTC/USDT:USDT")
+    assert book == {"bids": [[10, 5], [9, 2]], "asks": [[11, 3]]}
+    assert instance.fetch_orderbook("BTC/USDT:USDT") == book
+    assert instance.exchange.book_calls == 1
