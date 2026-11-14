@@ -6,6 +6,7 @@ closed OHLC candles plus public Nobitex trades/order-book snapshots.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -44,6 +45,8 @@ def _closed_candles(rows: list[list[float]], timeframe: str, now_ms: int) -> lis
             ts = int(row[0])
             values = list(map(float, row[1:6]))
             o, h, low, close, volume = values
+            if not all(math.isfinite(value) for value in values):
+                continue
             if ts + duration > now_ms or min(o, h, low, close) <= 0 or volume < 0:
                 continue
             if h < max(o, close, low) or low > min(o, close, h):
