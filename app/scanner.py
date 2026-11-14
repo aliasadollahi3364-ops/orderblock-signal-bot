@@ -134,7 +134,7 @@ class AutomaticScanner:
         strategy_config = runtime.strategy_config or self.strategy_config
         # Manual-only mode: never download or select the exchange-wide market universe.
         # The scanner evaluates only symbols explicitly saved through Telegram /add.
-        manual_markets: list[MarketCandidate] = []
+        manual_markets: list[Any] = []
         for requested in list(runtime.manual_symbols):
             try:
                 manual_markets.append(self.market_data.resolve_manual_symbol(requested))
