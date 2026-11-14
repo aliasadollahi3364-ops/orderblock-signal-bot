@@ -102,7 +102,7 @@ def _strategy_text() -> str:
         "use_sma200_filter": "فیلتر SMA200 اردربلاک", "use_trailing_stop": "تریلینگ استاپ",
         "trailing_atr_mult": "ضریب تریلینگ", "min_tick": "حداقل گام قیمت",
     }
-    lines = ["⚙️ تنظیمات استراتژی", "دو مسیر ورود: اردربلاک ۱۵ دقیقه و خط روند ۱۵ دقیقه", "منبع روند و محدوده مرجع: اردربلاک ۴ ساعته"]
+    lines = ["⚙️ تنظیمات استراتژی", "مسیر اول: برخورد به اردربلاک ۴ساعته + تغییر روند و پولبک ۱۵دقیقه‌ای", "مسیر دوم: شکست خط روند ۱۵دقیقه‌ای + پولبک و تأیید", "محدوده مرجع: اردربلاک ۴ساعته"]
     for key, value in asdict(cfg).items():
         shown = "روشن" if value is True else "خاموش" if value is False else str(value)
         lines.append(f"{labels.get(key, key)}: {shown}")
@@ -495,6 +495,9 @@ async def toggle_strategy_value(update: Update, context: ContextTypes.DEFAULT_TY
             "گزینه روشن/خاموش پیدا نشد. نام‌های کوتاه: trend, trendline, trendline_sma, trendline_pullback, "
             "ob_touch, choch, retest, confirm_candle, sma200, trailing"
         )
+        return
+    if key == "require_trendline_pullback" and not enabled:
+        await _reply_temporary(update, context, "پولبک خط روند در Pine اصلی اجباری است و نمی‌توان آن را خاموش کرد.")
         return
     values[key] = enabled
     _save_strategy_config(StrategyConfig(**values))
