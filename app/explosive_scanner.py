@@ -1,7 +1,7 @@
 """Independent, alert-only strict scanner for potentially explosive moves.
 
 It never opens demo positions and never submits exchange orders. It uses only
-closed OHLC candles plus public Nobitex trades/order-book snapshots.
+closed OHLC candles plus public WEEX trades/order-book snapshots.
 """
 from __future__ import annotations
 
@@ -34,7 +34,6 @@ class ExplosiveAlert:
     tp3: float
     timestamp: int
     reasons: tuple[str, ...]
-    margin_direction_verified: bool = False
 
 
 def _closed_candles(rows: list[list[float]], timeframe: str, now_ms: int) -> list[Candle]:
