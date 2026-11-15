@@ -2,7 +2,7 @@ name: Python tests
 
 on:
   push:
-    branches: [main, weex-manual-only]
+    branches: [main, weex-manual-only, feature/plain-symbol-add]
   pull_request:
     branches: [main, weex-manual-only]
 
