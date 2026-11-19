@@ -164,15 +164,17 @@ def _alert(
     bar: Candle,
     reasons: list[str],
     allow_confirmed: bool = False,
+    entry_bar: Candle | None = None,
 ) -> RadarAlert | None:
     stage = _stage(score)
     if stage is None:
         return None
     if stage == "CONFIRMED" and not allow_confirmed:
         stage = "PRE_SIGNAL"
+    reference_bar = entry_bar if stage == "CONFIRMED" and entry_bar is not None else bar
     return RadarAlert(
         symbol, category, side, stage, min(100, score),
-        bar.timestamp, bar.close, tuple(reasons),
+        reference_bar.timestamp, reference_bar.close, tuple(reasons),
     )
 
 
@@ -237,7 +239,7 @@ def evaluate_market_radar(
     if not bullish_break and not bearish_break:
         score += 10
         why.append("هنوز شکست نهایی رخ نداده")
-    item = _alert(symbol, "EARLY", "BUY", score, m, why, bull_confirmed)
+    item = _alert(symbol, "EARLY", "BUY", score, m, why, bull_confirmed, five_minute[-1] if five_minute else None)
     if item:
         alerts.append(item)
 
@@ -262,7 +264,7 @@ def evaluate_market_radar(
         score += 10
         why.append("وجود اردربلاک صعودی فعال ۴ساعته نزدیک قیمت")
     why.extend(bull_tf_reasons if bull_confirmed else [])
-    item = _alert(symbol, "BULLISH_BREAKOUT", "BUY", score, m, why, bull_confirmed)
+    item = _alert(symbol, "BULLISH_BREAKOUT", "BUY", score, m, why, bull_confirmed, five_minute[-1] if five_minute else None)
     if item:
         alerts.append(item)
 
@@ -290,7 +292,7 @@ def evaluate_market_radar(
         score += 10
         why.append("نزدیکی قیمت به اردربلاک نزولی فعال ۴ساعته")
     why.extend(bear_tf_reasons if bear_confirmed else [])
-    item = _alert(symbol, "ATH_WARNING", "SELL", score, d, why, bear_confirmed)
+    item = _alert(symbol, "ATH_WARNING", "SELL", score, d, why, bear_confirmed, five_minute[-1] if five_minute else None)
     if item:
         alerts.append(item)
 
@@ -315,7 +317,7 @@ def evaluate_market_radar(
         score += 10
         why.append("وجود اردربلاک نزولی فعال ۴ساعته نزدیک قیمت")
     why.extend(bear_tf_reasons if bear_confirmed else [])
-    item = _alert(symbol, "BEARISH_BREAKDOWN", "SELL", score, m, why, bear_confirmed)
+    item = _alert(symbol, "BEARISH_BREAKDOWN", "SELL", score, m, why, bear_confirmed, five_minute[-1] if five_minute else None)
     if item:
         alerts.append(item)
 
@@ -343,7 +345,7 @@ def evaluate_market_radar(
         score += 10
         why.append("نزدیکی قیمت به اردربلاک صعودی فعال ۴ساعته")
     why.extend(bull_tf_reasons if bull_confirmed else [])
-    item = _alert(symbol, "BOTTOM_REVERSAL", "BUY", score, d, why, bull_confirmed)
+    item = _alert(symbol, "BOTTOM_REVERSAL", "BUY", score, d, why, bull_confirmed, five_minute[-1] if five_minute else None)
     if item:
         alerts.append(item)
 
