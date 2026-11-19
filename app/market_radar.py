@@ -1,4 +1,4 @@
-"""Independent five-category market radar.
+"""Independent five-category market radar with top-down entry confirmation.
 
 This module is alert-only. It does not import or modify the trading strategy,
 open demo positions, or submit exchange orders. ATH/ATL references are limited
@@ -37,6 +37,16 @@ def _stage(score: int) -> str | None:
     if score >= 50:
         return "WATCH"
     return None
+
+
+def _ema(values: list[float], length: int) -> float | None:
+    if len(values) < length:
+        return None
+    alpha = 2.0 / (length + 1)
+    value = _mean(values[:length])
+    for item in values[length:]:
+        value = alpha * item + (1 - alpha) * value
+    return value
 
 
 def _volume_ratio(bars: list[Candle], lookback: int = 20) -> float:
@@ -90,13 +100,80 @@ def _sweep_high(bars: list[Candle]) -> bool:
     return bars[-1].high > level and bars[-1].close < level
 
 
-def _alert(symbol: str, category: str, side: str, score: int,
-           bar: Candle, reasons: list[str]) -> RadarAlert | None:
+def _five_minute_trigger(bars: list[Candle], side: str) -> bool:
+    """Require a closed 5m candle to break the preceding three-candle range."""
+    if len(bars) < 5:
+        return False
+    last = bars[-1]
+    prior = bars[-4:-1]
+    if side == "BUY":
+        return last.close > last.open and last.close > max(bar.high for bar in prior)
+    return last.close < last.open and last.close < min(bar.low for bar in prior)
+
+
+def _top_down_confirmation(
+    side: str,
+    daily: list[Candle],
+    four_hour: list[Candle],
+    hourly: list[Candle],
+    fifteen_minute: list[Candle],
+    five_minute: list[Candle],
+) -> tuple[bool, list[str]]:
+    """D1 bias -> H4 direction -> H1 structure -> M15 setup -> M5 trigger."""
+    daily_ema = _ema([bar.close for bar in daily], 20)
+    if daily_ema is None:
+        return False, []
+    if side == "BUY":
+        d1_ok = daily[-1].close > daily_ema
+        h4_ok = four_hour[-1].close > four_hour[-6].close
+        h1_ok = _bullish_structure(hourly)
+        m15_ok = (
+            _bullish_structure(fifteen_minute)
+            or _sweep_low(fifteen_minute)
+            or fifteen_minute[-1].close > max(bar.high for bar in fifteen_minute[-21:-1])
+        )
+    else:
+        d1_ok = daily[-1].close < daily_ema
+        h4_ok = four_hour[-1].close < four_hour[-6].close
+        h1_ok = _bearish_structure(hourly)
+        m15_ok = (
+            _bearish_structure(fifteen_minute)
+            or _sweep_high(fifteen_minute)
+            or fifteen_minute[-1].close < min(bar.low for bar in fifteen_minute[-21:-1])
+        )
+    m5_ok = _five_minute_trigger(five_minute, side)
+    reasons = []
+    if d1_ok:
+        reasons.append("جهت روزانه همسو")
+    if h4_ok:
+        reasons.append("جهت ۴ساعته همسو")
+    if h1_ok:
+        reasons.append("ساختار ۱ساعته همسو")
+    if m15_ok:
+        reasons.append("آماده‌سازی ورود در ۱۵دقیقه")
+    if m5_ok:
+        reasons.append("تریگر ورود در کندل بسته‌شده ۵دقیقه")
+    return d1_ok and h4_ok and h1_ok and m15_ok and m5_ok, reasons
+
+
+def _alert(
+    symbol: str,
+    category: str,
+    side: str,
+    score: int,
+    bar: Candle,
+    reasons: list[str],
+    allow_confirmed: bool = False,
+) -> RadarAlert | None:
     stage = _stage(score)
     if stage is None:
         return None
-    return RadarAlert(symbol, category, side, stage, min(100, score),
-                      bar.timestamp, bar.close, tuple(reasons))
+    if stage == "CONFIRMED" and not allow_confirmed:
+        stage = "PRE_SIGNAL"
+    return RadarAlert(
+        symbol, category, side, stage, min(100, score),
+        bar.timestamp, bar.close, tuple(reasons),
+    )
 
 
 def evaluate_market_radar(
@@ -105,19 +182,22 @@ def evaluate_market_radar(
     four_hour: list[Candle],
     hourly: list[Candle],
     fifteen_minute: list[Candle],
+    five_minute: list[Candle] | None = None,
     bullish_ob_near: bool = False,
     bearish_ob_near: bool = False,
 ) -> list[RadarAlert]:
-    """Return independent alerts for any of the five agreed radar categories.
+    """Evaluate five independent radar categories using closed candles only.
 
-    At least 30 closed bars per timeframe are required. ATH/ATL calculations
-    use the available daily sample, not a claim of complete exchange history.
+    D1/H4/H1 define directional context. M15 prepares the setup and a closed
+    M5 breakout/rejection candle is mandatory before any category can become
+    CONFIRMED. ATH/ATL use the available daily sample, not complete history.
     """
+    five_minute = five_minute or []
     if min(map(len, (daily, four_hour, hourly, fifteen_minute))) < 30:
         return []
 
     alerts: list[RadarAlert] = []
-    d, h, m = daily[-1], hourly[-1], fifteen_minute[-1]
+    d, m = daily[-1], fifteen_minute[-1]
     vol = _volume_ratio(fifteen_minute)
     daily_vol = _volume_ratio(daily)
     compressed = _range_compression(hourly)
@@ -129,6 +209,13 @@ def evaluate_market_radar(
     prior_low = min(bar.low for bar in fifteen_minute[-21:-1])
     bullish_break = m.close > prior_high
     bearish_break = m.close < prior_low
+
+    bull_confirmed, bull_tf_reasons = _top_down_confirmation(
+        "BUY", daily, four_hour, hourly, fifteen_minute, five_minute
+    )
+    bear_confirmed, bear_tf_reasons = _top_down_confirmation(
+        "SELL", daily, four_hour, hourly, fifteen_minute, five_minute
+    )
 
     # 1) Early / pre-expansion accumulation.
     score, why = 0, []
@@ -150,7 +237,7 @@ def evaluate_market_radar(
     if not bullish_break and not bearish_break:
         score += 10
         why.append("هنوز شکست نهایی رخ نداده")
-    item = _alert(symbol, "EARLY", "BUY", score, m, why)
+    item = _alert(symbol, "EARLY", "BUY", score, m, why, bull_confirmed)
     if item:
         alerts.append(item)
 
@@ -165,7 +252,7 @@ def evaluate_market_radar(
     if bull:
         score += 20
         why.append("تغییر ساختار کوتاه‌مدت صعودی")
-    if _sweep_low(fifteen_minute[-30:]):
+    if sweep_down:
         score += 10
         why.append("جمع‌آوری نقدینگی زیر کف اخیر")
     if four_hour[-1].close > four_hour[-6].close:
@@ -174,7 +261,8 @@ def evaluate_market_radar(
     if bullish_ob_near:
         score += 10
         why.append("وجود اردربلاک صعودی فعال ۴ساعته نزدیک قیمت")
-    item = _alert(symbol, "BULLISH_BREAKOUT", "BUY", score, m, why)
+    why.extend(bull_tf_reasons if bull_confirmed else [])
+    item = _alert(symbol, "BULLISH_BREAKOUT", "BUY", score, m, why, bull_confirmed)
     if item:
         alerts.append(item)
 
@@ -201,7 +289,8 @@ def evaluate_market_radar(
     if bearish_ob_near:
         score += 10
         why.append("نزدیکی قیمت به اردربلاک نزولی فعال ۴ساعته")
-    item = _alert(symbol, "ATH_WARNING", "SELL", score, d, why)
+    why.extend(bear_tf_reasons if bear_confirmed else [])
+    item = _alert(symbol, "ATH_WARNING", "SELL", score, d, why, bear_confirmed)
     if item:
         alerts.append(item)
 
@@ -225,7 +314,8 @@ def evaluate_market_radar(
     if bearish_ob_near:
         score += 10
         why.append("وجود اردربلاک نزولی فعال ۴ساعته نزدیک قیمت")
-    item = _alert(symbol, "BEARISH_BREAKDOWN", "SELL", score, m, why)
+    why.extend(bear_tf_reasons if bear_confirmed else [])
+    item = _alert(symbol, "BEARISH_BREAKDOWN", "SELL", score, m, why, bear_confirmed)
     if item:
         alerts.append(item)
 
@@ -252,7 +342,8 @@ def evaluate_market_radar(
     if bullish_ob_near:
         score += 10
         why.append("نزدیکی قیمت به اردربلاک صعودی فعال ۴ساعته")
-    item = _alert(symbol, "BOTTOM_REVERSAL", "BUY", score, d, why)
+    why.extend(bull_tf_reasons if bull_confirmed else [])
+    item = _alert(symbol, "BOTTOM_REVERSAL", "BUY", score, d, why, bull_confirmed)
     if item:
         alerts.append(item)
 
