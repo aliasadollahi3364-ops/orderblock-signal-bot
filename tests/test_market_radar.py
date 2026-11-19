@@ -1,5 +1,5 @@
 from app.market_radar import (
-    _bearish_structure, _bullish_structure, _five_minute_trigger, _stage,
+    _bearish_structure, _bullish_structure, _entry_plan, _five_minute_trigger, _stage,
     evaluate_market_radar,
 )
 from app.strategy import Candle
@@ -116,3 +116,26 @@ def test_five_minute_trigger_requires_closed_candle_breakout():
     assert not _five_minute_trigger(bars, "BUY")
     bars[-1] = Candle(bars[-1].timestamp, 101.04, 102.20, 101.03, 102.18, 100)
     assert _five_minute_trigger(bars, "BUY")
+
+
+
+def test_m5_entry_plan_has_structural_stop_and_2r_3r_4r_targets():
+    bars = []
+    for index in range(20):
+        price = 100 + index * 0.05
+        bars.append(Candle(index * 300_000, price, price + 0.08,
+                           price - 0.08, price + 0.04, 100))
+    bars[-1] = Candle(bars[-1].timestamp, 101.02, 101.20, 101.00, 101.18, 150)
+    plan = _entry_plan("BUY", bars)
+    assert plan is not None
+    entry, stop, tp1, tp2, tp3 = plan
+    risk = entry - stop
+    assert stop < entry < tp1 < tp2 < tp3
+    assert abs((tp1 - entry) / risk - 2) < 1e-9
+    assert abs((tp2 - entry) / risk - 3) < 1e-9
+    assert abs((tp3 - entry) / risk - 4) < 1e-9
+
+
+def test_m5_entry_plan_rejects_wide_stop():
+    bars = series(20, 100, 0.01, 100)
+    assert _entry_plan("BUY", bars) is None
