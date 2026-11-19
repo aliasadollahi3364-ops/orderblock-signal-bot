@@ -107,6 +107,7 @@ def evaluate_market_radar(
     alerts: list[RadarAlert] = []
     d, h, m = daily[-1], hourly[-1], fifteen_minute[-1]
     vol = _volume_ratio(fifteen_minute)
+    daily_vol = _volume_ratio(daily)
     compressed = _range_compression(hourly)
     bull = _bullish_structure(fifteen_minute)
     bear = _bearish_structure(fifteen_minute)
@@ -173,7 +174,7 @@ def evaluate_market_radar(
     if bear or sweep_up:
         score += 20
         why.append("نشانه ضعف ساختار یا جمع‌آوری نقدینگی بالای سقف")
-    if vol >= 1.5 and d.close < d.open:
+    if daily_vol >= 1.5 and d.close < d.open:
         score += 15
         why.append("افزایش حجم همراه با کندل روزانه نزولی")
     if four_hour[-1].close < four_hour[-6].close:
@@ -221,7 +222,7 @@ def evaluate_market_radar(
     if bull:
         score += 15
         why.append("تغییر ساختار کوتاه‌مدت صعودی")
-    if vol >= 1.5 and d.close > d.open:
+    if daily_vol >= 1.5 and d.close > d.open:
         score += 10
         why.append("افزایش حجم همراه با کندل روزانه صعودی")
     item = _alert(symbol, "BOTTOM_REVERSAL", "BUY", score, d, why)
