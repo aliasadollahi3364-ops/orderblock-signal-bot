@@ -50,7 +50,7 @@ def test_radar_fetches_daily_data_and_emits_alert_only_for_requested_symbols(mon
         reasons=("test reason",),
     )
 
-    def fake_evaluate(symbol, daily, four_hour, hourly, fifteen_minute):
+    def fake_evaluate(symbol, daily, four_hour, hourly, fifteen_minute, **kwargs):
         assert len(daily) >= 30
         assert len(four_hour) >= 30
         assert len(hourly) >= 30
