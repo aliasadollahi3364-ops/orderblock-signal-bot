@@ -62,7 +62,7 @@ def test_bottom_reversal_uses_available_daily_low_and_bullish_reversal():
     hourly = series(40, 100, 0.05, 100)
     fifteen = series(40, 100, 0.03, 100)
     previous_high = max(bar.high for bar in fifteen[-7:-1])
-    fifteen[-1] = Candle(39 * 60_000, previous_high, previous_high + 1,
+    fifteen[-1] = Candle(39 * 60_000, previous_high, previous_high + 3,
                          99, previous_high + 2, 250)
 
     alerts = evaluate_market_radar("BTC/USDT", daily, four_hour, hourly, fifteen)
