@@ -332,7 +332,7 @@ class ExplosiveMoveScanner:
                     bullish_ob_near, _, _ = _ob_for_side(bars["4h"], "BUY", radar_price)
                     bearish_ob_near, _, _ = _ob_for_side(bars["4h"], "SELL", radar_price)
                     for radar_alert in evaluate_market_radar(
-                        symbol, daily, bars["4h"], bars["1h"], bars["15m"],
+                        symbol, daily, bars["4h"], bars["1h"], bars["15m"], bars["5m"],
                         bullish_ob_near=bullish_ob_near,
                         bearish_ob_near=bearish_ob_near,
                     ):
