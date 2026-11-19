@@ -114,5 +114,5 @@ def test_single_candle_breakout_is_not_counted_as_full_structure_shift():
 def test_five_minute_trigger_requires_closed_candle_breakout():
     bars = series(5, 100, 0.01, 100)
     assert not _five_minute_trigger(bars, "BUY")
-    bars[-1] = Candle(bars[-1].timestamp, 100.04, 100.20, 100.03, 100.18, 100)
+    bars[-1] = Candle(bars[-1].timestamp, 101.04, 102.20, 101.03, 102.18, 100)
     assert _five_minute_trigger(bars, "BUY")
