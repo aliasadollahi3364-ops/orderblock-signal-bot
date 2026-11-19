@@ -57,13 +57,23 @@ def _range_compression(bars: list[Candle]) -> bool:
 def _bullish_structure(bars: list[Candle]) -> bool:
     if len(bars) < 8:
         return False
-    return bars[-1].close > max(bar.high for bar in bars[-7:-1])
+    prior, recent = bars[-8:-4], bars[-4:]
+    return (
+        min(bar.low for bar in recent) > min(bar.low for bar in prior)
+        and max(bar.high for bar in recent) > max(bar.high for bar in prior)
+        and recent[-1].close > recent[0].close
+    )
 
 
 def _bearish_structure(bars: list[Candle]) -> bool:
     if len(bars) < 8:
         return False
-    return bars[-1].close < min(bar.low for bar in bars[-7:-1])
+    prior, recent = bars[-8:-4], bars[-4:]
+    return (
+        max(bar.high for bar in recent) < max(bar.high for bar in prior)
+        and min(bar.low for bar in recent) < min(bar.low for bar in prior)
+        and recent[-1].close < recent[0].close
+    )
 
 
 def _sweep_low(bars: list[Candle]) -> bool:
@@ -95,6 +105,8 @@ def evaluate_market_radar(
     four_hour: list[Candle],
     hourly: list[Candle],
     fifteen_minute: list[Candle],
+    bullish_ob_near: bool = False,
+    bearish_ob_near: bool = False,
 ) -> list[RadarAlert]:
     """Return independent alerts for any of the five agreed radar categories.
 
@@ -132,6 +144,9 @@ def evaluate_market_radar(
     if four_hour[-1].close > four_hour[-6].close:
         score += 15
         why.append("تمایل صعودی در ۴ساعته")
+    if bullish_ob_near:
+        score += 10
+        why.append("نزدیکی قیمت به اردربلاک صعودی فعال ۴ساعته")
     if not bullish_break and not bearish_break:
         score += 10
         why.append("هنوز شکست نهایی رخ نداده")
@@ -156,6 +171,9 @@ def evaluate_market_radar(
     if four_hour[-1].close > four_hour[-6].close:
         score += 10
         why.append("هم‌جهتی حرکت با مومنتوم ۴ساعته")
+    if bullish_ob_near:
+        score += 10
+        why.append("وجود اردربلاک صعودی فعال ۴ساعته نزدیک قیمت")
     item = _alert(symbol, "BULLISH_BREAKOUT", "BUY", score, m, why)
     if item:
         alerts.append(item)
@@ -180,6 +198,9 @@ def evaluate_market_radar(
     if four_hour[-1].close < four_hour[-6].close:
         score += 10
         why.append("ضعف مومنتوم ۴ساعته")
+    if bearish_ob_near:
+        score += 10
+        why.append("نزدیکی قیمت به اردربلاک نزولی فعال ۴ساعته")
     item = _alert(symbol, "ATH_WARNING", "SELL", score, d, why)
     if item:
         alerts.append(item)
@@ -201,6 +222,9 @@ def evaluate_market_radar(
     if four_hour[-1].close < four_hour[-6].close:
         score += 10
         why.append("هم‌جهتی مومنتوم ۴ساعته با نزول")
+    if bearish_ob_near:
+        score += 10
+        why.append("وجود اردربلاک نزولی فعال ۴ساعته نزدیک قیمت")
     item = _alert(symbol, "BEARISH_BREAKDOWN", "SELL", score, m, why)
     if item:
         alerts.append(item)
@@ -225,6 +249,9 @@ def evaluate_market_radar(
     if daily_vol >= 1.5 and d.close > d.open:
         score += 10
         why.append("افزایش حجم همراه با کندل روزانه صعودی")
+    if bullish_ob_near:
+        score += 10
+        why.append("نزدیکی قیمت به اردربلاک صعودی فعال ۴ساعته")
     item = _alert(symbol, "BOTTOM_REVERSAL", "BUY", score, d, why)
     if item:
         alerts.append(item)
