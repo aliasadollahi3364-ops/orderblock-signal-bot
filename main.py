@@ -115,8 +115,17 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
             f"📡 رادار بازار | {category_names.get(alert.category, alert.category)}\n"
             f"{stage_names.get(alert.stage, alert.stage)} | جهت: {side} | امتیاز: {alert.score}/100\n"
             f"نماد: {alert.symbol}\nقیمت مرجع: {alert.reference_price:g}\n"
-            f"زمان کندل: {timestamp}\nدلایل:\n{reasons}\n"
-            "هشدار تحلیلی مستقل است؛ سیگنال ورود استراتژی اصلی یا دستور معامله نیست. فقط دمو."
+            f"زمان کندل: {timestamp}\n"
+            + (
+                f"\n📍 برنامه ورود رادار (فقط در سطح تأییدشده):\n"
+                f"ورود: {alert.entry_price:g}\nحد ضرر ساختاری: {alert.stop_loss:g}\n"
+                f"TP1 (2R): {alert.tp1:g}\nTP2 (3R): {alert.tp2:g}\nTP3 (4R): {alert.tp3:g}\n"
+                if alert.stage == "CONFIRMED" and alert.entry_price is not None
+                and alert.stop_loss is not None and alert.tp1 is not None
+                and alert.tp2 is not None and alert.tp3 is not None else ""
+            )
+            + f"\nدلایل:\n{reasons}\n"
+            + "هشدار تحلیلی مستقل است؛ دستور معامله یا سیگنال استراتژی اصلی نیست. فقط دمو."
         )
 
     def handle_trade_event(event: dict) -> None:
