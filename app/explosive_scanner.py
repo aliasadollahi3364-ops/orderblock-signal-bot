@@ -14,10 +14,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from app.market_radar import RadarAlert, evaluate_market_radar
 from app.strategy import Candle, OrderBlockStrategy, StrategyConfig
 
 log = logging.getLogger(__name__)
-DURATION_MS = {"4h": 4 * 60 * 60 * 1000, "1h": 60 * 60 * 1000,
+DURATION_MS = {"1d": 24 * 60 * 60 * 1000, "4h": 4 * 60 * 60 * 1000, "1h": 60 * 60 * 1000,
                "15m": 15 * 60 * 1000, "5m": 5 * 60 * 1000}
 
 
@@ -223,10 +224,13 @@ def _five_minute_timing(bars5: list[Candle], side: str) -> bool:
 class ExplosiveMoveScanner:
     """Strict multi-timeframe alert engine; early warnings upgrade to confirmed."""
 
-    def __init__(self, market_data: Any, on_alert: Callable[[ExplosiveAlert], None] | None = None):
+    def __init__(self, market_data: Any, on_alert: Callable[[ExplosiveAlert], None] | None = None,
+                 on_radar_alert: Callable[[RadarAlert], None] | None = None):
         self.market_data = market_data
         self.on_alert = on_alert
+        self.on_radar_alert = on_radar_alert
         self._state: dict[tuple[str, str], tuple[str, int]] = {}
+        self._radar_state: dict[tuple[str, str], tuple[str, int]] = {}
 
     def _evaluate_side(self, symbol: str, side: str, bars4: list[Candle],
                        bars1h: list[Candle], bars15: list[Candle], bars5: list[Candle],
@@ -315,6 +319,21 @@ class ExplosiveMoveScanner:
                 }
                 if any(len(bars[tf]) < 30 for tf in bars):
                     continue
+                if self.on_radar_alert:
+                    daily = _closed_candles(self.market_data.fetch_ohlcv(symbol, "1d", 400), "1d", now_ms)
+                    for radar_alert in evaluate_market_radar(
+                        symbol, daily, bars["4h"], bars["1h"], bars["15m"]
+                    ):
+                        key = (symbol, radar_alert.category)
+                        previous = self._radar_state.get(key)
+                        rank = {"WATCH": 1, "PRE_SIGNAL": 2, "CONFIRMED": 3}
+                        if previous and (
+                            rank[previous[0]] >= rank[radar_alert.stage]
+                            and now_ms - previous[1] < 24 * 60 * 60 * 1000
+                        ):
+                            continue
+                        self._radar_state[key] = (radar_alert.stage, now_ms)
+                        self.on_radar_alert(radar_alert)
                 trades = self.market_data.fetch_trades(symbol)
                 book = self.market_data.fetch_orderbook(symbol)
                 for side in ("BUY", "SELL"):
@@ -342,6 +361,10 @@ class ExplosiveMoveScanner:
         cutoff = now_ms - 24 * 60 * 60 * 1000
         self._state = {
             key: value for key, value in self._state.items()
+            if value[1] >= cutoff
+        }
+        self._radar_state = {
+            key: value for key, value in self._radar_state.items()
             if value[1] >= cutoff
         }
         return alerts
