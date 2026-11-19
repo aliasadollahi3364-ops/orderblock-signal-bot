@@ -1,4 +1,4 @@
-from app.market_radar import _stage, evaluate_market_radar
+from app.market_radar import _bearish_structure, _bullish_structure, _stage, evaluate_market_radar
 from app.strategy import Candle
 
 
@@ -70,3 +70,23 @@ def test_bottom_reversal_uses_available_daily_low_and_bullish_reversal():
     assert bottom.stage == "CONFIRMED"
     assert bottom.score >= 80
     assert "تاریخچه روزانه موجود" in " ".join(bottom.reasons)
+
+
+
+def test_order_block_confluence_adds_an_explicit_reason():
+    daily = series(40, 100, 0.1, 100)
+    four_hour = series(40, 100, 0.2, 100)
+    hourly = series(40, 100, 0.05, 100)
+    fifteen = series(40, 100, 0.03, 100)
+    alerts = evaluate_market_radar(
+        "BTC/USDT", daily, four_hour, hourly, fifteen, bullish_ob_near=True
+    )
+    early = next(alert for alert in alerts if alert.category == "EARLY")
+    assert any("اردربلاک صعودی فعال ۴ساعته" in reason for reason in early.reasons)
+
+
+def test_single_candle_breakout_is_not_counted_as_full_structure_shift():
+    flat = [Candle(i * 60_000, 100, 101, 99, 100, 100) for i in range(8)]
+    flat[-1] = Candle(7 * 60_000, 100, 103, 99, 102, 200)
+    assert not _bullish_structure(flat)
+    assert not _bearish_structure(flat)
