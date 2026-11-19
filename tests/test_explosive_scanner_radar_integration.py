@@ -36,7 +36,7 @@ class FakePublicMarketData:
         return {"bids": [], "asks": []}
 
 
-def test_radar_fetches_daily_data_and_emits_alert_only_for_requested_symbols(monkeypatch):
+def test_radar_fetches_all_top_down_timeframes_and_only_manual_requested_symbols(monkeypatch):
     market_data = FakePublicMarketData()
     delivered = []
     expected = RadarAlert(
@@ -50,11 +50,12 @@ def test_radar_fetches_daily_data_and_emits_alert_only_for_requested_symbols(mon
         reasons=("test reason",),
     )
 
-    def fake_evaluate(symbol, daily, four_hour, hourly, fifteen_minute, **kwargs):
+    def fake_evaluate(symbol, daily, four_hour, hourly, fifteen_minute, five_minute, **kwargs):
         assert len(daily) >= 30
         assert len(four_hour) >= 30
         assert len(hourly) >= 30
         assert len(fifteen_minute) >= 30
+        assert len(five_minute) >= 30
         assert set(kwargs) == {"bullish_ob_near", "bearish_ob_near"}
         return [expected]
 
@@ -62,7 +63,8 @@ def test_radar_fetches_daily_data_and_emits_alert_only_for_requested_symbols(mon
     scanner = ExplosiveMoveScanner(market_data, on_radar_alert=delivered.append)
     scanner.scan_once(["MANUAL/USDT:USDT"])
 
-    assert ("MANUAL/USDT:USDT", "1d") in market_data.requests
+    for timeframe in ("1d", "4h", "1h", "15m", "5m"):
+        assert ("MANUAL/USDT:USDT", timeframe) in market_data.requests
     assert {symbol for symbol, _ in market_data.requests} == {"MANUAL/USDT:USDT"}
     assert delivered == [expected]
     assert scanner._radar_state[("MANUAL/USDT:USDT", "EARLY")][0] == "WATCH"
