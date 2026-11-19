@@ -230,7 +230,8 @@ class ExplosiveMoveScanner:
         self.on_alert = on_alert
         self.on_radar_alert = on_radar_alert
         self._state: dict[tuple[str, str], tuple[str, int]] = {}
-        self._radar_state: dict[tuple[str, str], tuple[str, int]] = {}\n        self._daily_cache: dict[str, tuple[int, list[Candle]]] = {}
+        self._radar_state: dict[tuple[str, str], tuple[str, int]] = {}
+        self._daily_cache: dict[str, tuple[int, list[Candle]]] = {}
 
     def _evaluate_side(self, symbol: str, side: str, bars4: list[Candle],
                        bars1h: list[Candle], bars15: list[Candle], bars5: list[Candle],
