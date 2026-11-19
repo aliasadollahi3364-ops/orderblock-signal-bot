@@ -138,4 +138,5 @@ def test_m5_entry_plan_has_structural_stop_and_2r_3r_4r_targets():
 
 def test_m5_entry_plan_rejects_wide_stop():
     bars = series(20, 100, 0.01, 100)
+    bars[-2] = Candle(bars[-2].timestamp, 100.0, 101.0, 95.0, 100.0, 100)
     assert _entry_plan("BUY", bars) is None
