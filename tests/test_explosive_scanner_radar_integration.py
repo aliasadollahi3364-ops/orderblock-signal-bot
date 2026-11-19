@@ -55,6 +55,7 @@ def test_radar_fetches_daily_data_and_emits_alert_only_for_requested_symbols(mon
         assert len(four_hour) >= 30
         assert len(hourly) >= 30
         assert len(fifteen_minute) >= 30
+        assert set(kwargs) == {"bullish_ob_near", "bearish_ob_near"}
         return [expected]
 
     monkeypatch.setattr("app.explosive_scanner.evaluate_market_radar", fake_evaluate)
