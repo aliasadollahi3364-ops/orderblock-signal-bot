@@ -22,6 +22,11 @@ class RadarAlert:
     timestamp: int
     reference_price: float
     reasons: tuple[str, ...]
+    entry_price: float | None = None
+    stop_loss: float | None = None
+    tp1: float | None = None
+    tp2: float | None = None
+    tp3: float | None = None
 
 
 def _mean(values: Iterable[float]) -> float:
@@ -156,6 +161,34 @@ def _top_down_confirmation(
     return d1_ok and h4_ok and h1_ok and m15_ok and m5_ok, reasons
 
 
+def _entry_plan(side: str, bars: list[Candle]) -> tuple[float, float, float, float, float] | None:
+    """Build a compact structural stop and 2R/3R/4R targets from closed M5 bars."""
+    if len(bars) < 15:
+        return None
+    entry = bars[-1].close
+    true_ranges = []
+    for index in range(1, len(bars)):
+        previous_close = bars[index - 1].close
+        bar = bars[index]
+        true_ranges.append(max(
+            bar.high - bar.low,
+            abs(bar.high - previous_close),
+            abs(bar.low - previous_close),
+        ))
+    atr = _mean(true_ranges[-14:])
+    if atr <= 0:
+        return None
+    recent = bars[-6:]
+    buffer = atr * 0.15
+    stop = min(bar.low for bar in recent) - buffer if side == "BUY" else max(bar.high for bar in recent) + buffer
+    risk = entry - stop if side == "BUY" else stop - entry
+    # Avoid calling a wide/poorly located stop a precision entry.
+    if risk <= 0 or risk / entry > 0.015:
+        return None
+    sign = 1 if side == "BUY" else -1
+    return entry, stop, entry + sign * 2 * risk, entry + sign * 3 * risk, entry + sign * 4 * risk
+
+
 def _alert(
     symbol: str,
     category: str,
@@ -164,17 +197,21 @@ def _alert(
     bar: Candle,
     reasons: list[str],
     allow_confirmed: bool = False,
-    entry_bar: Candle | None = None,
+    entry_bars: list[Candle] | None = None,
 ) -> RadarAlert | None:
     stage = _stage(score)
     if stage is None:
         return None
     if stage == "CONFIRMED" and not allow_confirmed:
         stage = "PRE_SIGNAL"
-    reference_bar = entry_bar if stage == "CONFIRMED" and entry_bar is not None else bar
+    plan = _entry_plan(side, entry_bars or []) if stage == "CONFIRMED" else None
+    if stage == "CONFIRMED" and plan is None:
+        stage = "PRE_SIGNAL"
+    reference_bar = entry_bars[-1] if stage == "CONFIRMED" and entry_bars else bar
     return RadarAlert(
         symbol, category, side, stage, min(100, score),
         reference_bar.timestamp, reference_bar.close, tuple(reasons),
+        *(plan if plan is not None and stage == "CONFIRMED" else (None, None, None, None, None)),
     )
 
 
@@ -239,7 +276,7 @@ def evaluate_market_radar(
     if not bullish_break and not bearish_break:
         score += 10
         why.append("هنوز شکست نهایی رخ نداده")
-    item = _alert(symbol, "EARLY", "BUY", score, m, why, bull_confirmed, five_minute[-1] if five_minute else None)
+    item = _alert(symbol, "EARLY", "BUY", score, m, why, bull_confirmed, five_minute)
     if item:
         alerts.append(item)
 
@@ -264,7 +301,7 @@ def evaluate_market_radar(
         score += 10
         why.append("وجود اردربلاک صعودی فعال ۴ساعته نزدیک قیمت")
     why.extend(bull_tf_reasons if bull_confirmed else [])
-    item = _alert(symbol, "BULLISH_BREAKOUT", "BUY", score, m, why, bull_confirmed, five_minute[-1] if five_minute else None)
+    item = _alert(symbol, "BULLISH_BREAKOUT", "BUY", score, m, why, bull_confirmed, five_minute)
     if item:
         alerts.append(item)
 
@@ -292,7 +329,7 @@ def evaluate_market_radar(
         score += 10
         why.append("نزدیکی قیمت به اردربلاک نزولی فعال ۴ساعته")
     why.extend(bear_tf_reasons if bear_confirmed else [])
-    item = _alert(symbol, "ATH_WARNING", "SELL", score, d, why, bear_confirmed, five_minute[-1] if five_minute else None)
+    item = _alert(symbol, "ATH_WARNING", "SELL", score, d, why, bear_confirmed, five_minute)
     if item:
         alerts.append(item)
 
@@ -317,7 +354,7 @@ def evaluate_market_radar(
         score += 10
         why.append("وجود اردربلاک نزولی فعال ۴ساعته نزدیک قیمت")
     why.extend(bear_tf_reasons if bear_confirmed else [])
-    item = _alert(symbol, "BEARISH_BREAKDOWN", "SELL", score, m, why, bear_confirmed, five_minute[-1] if five_minute else None)
+    item = _alert(symbol, "BEARISH_BREAKDOWN", "SELL", score, m, why, bear_confirmed, five_minute)
     if item:
         alerts.append(item)
 
@@ -345,7 +382,7 @@ def evaluate_market_radar(
         score += 10
         why.append("نزدیکی قیمت به اردربلاک صعودی فعال ۴ساعته")
     why.extend(bull_tf_reasons if bull_confirmed else [])
-    item = _alert(symbol, "BOTTOM_REVERSAL", "BUY", score, d, why, bull_confirmed, five_minute[-1] if five_minute else None)
+    item = _alert(symbol, "BOTTOM_REVERSAL", "BUY", score, d, why, bull_confirmed, five_minute)
     if item:
         alerts.append(item)
 
