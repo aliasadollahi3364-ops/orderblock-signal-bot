@@ -230,7 +230,7 @@ class ExplosiveMoveScanner:
         self.on_alert = on_alert
         self.on_radar_alert = on_radar_alert
         self._state: dict[tuple[str, str], tuple[str, int]] = {}
-        self._radar_state: dict[tuple[str, str], tuple[str, int]] = {}
+        self._radar_state: dict[tuple[str, str], tuple[str, int]] = {}\n        self._daily_cache: dict[str, tuple[int, list[Candle]]] = {}
 
     def _evaluate_side(self, symbol: str, side: str, bars4: list[Candle],
                        bars1h: list[Candle], bars15: list[Candle], bars5: list[Candle],
@@ -320,7 +320,13 @@ class ExplosiveMoveScanner:
                 if any(len(bars[tf]) < 30 for tf in bars):
                     continue
                 if self.on_radar_alert:
-                    daily = _closed_candles(self.market_data.fetch_ohlcv(symbol, "1d", 400), "1d", now_ms)
+                    day_bucket = now_ms // DURATION_MS["1d"]
+                    cached_daily = self._daily_cache.get(symbol)
+                    if cached_daily is None or cached_daily[0] != day_bucket:
+                        daily = _closed_candles(self.market_data.fetch_ohlcv(symbol, "1d", 400), "1d", now_ms)
+                        self._daily_cache[symbol] = (day_bucket, daily)
+                    else:
+                        daily = cached_daily[1]
                     for radar_alert in evaluate_market_radar(
                         symbol, daily, bars["4h"], bars["1h"], bars["15m"]
                     ):
