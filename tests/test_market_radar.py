@@ -1,4 +1,7 @@
-from app.market_radar import _bearish_structure, _bullish_structure, _stage, evaluate_market_radar
+from app.market_radar import (
+    _bearish_structure, _bullish_structure, _five_minute_trigger, _stage,
+    evaluate_market_radar,
+)
 from app.strategy import Candle
 
 
@@ -20,7 +23,8 @@ def test_radar_alerts_are_independent_and_alert_only():
     four_hour = series(40, 100, 0.2, 100)
     hourly = series(40, 100, 0.05, 100)
     fifteen = series(40, 100, 0.03, 100)
-    alerts = evaluate_market_radar("BTC/USDT", daily, four_hour, hourly, fifteen)
+    five = series(40, 100, 0.01, 100)
+    alerts = evaluate_market_radar("BTC/USDT", daily, four_hour, hourly, fifteen, five)
 
     assert all(alert.symbol == "BTC/USDT" for alert in alerts)
     assert all(alert.category in {
@@ -32,7 +36,6 @@ def test_radar_alerts_are_independent_and_alert_only():
     assert all(alert.side in {"BUY", "SELL"} for alert in alerts)
 
 
-
 def test_alert_stage_thresholds():
     assert _stage(49) is None
     assert _stage(50) == "WATCH"
@@ -40,22 +43,36 @@ def test_alert_stage_thresholds():
     assert _stage(80) == "CONFIRMED"
 
 
-def test_ath_warning_uses_available_daily_high_and_daily_volume():
+def test_high_score_is_not_confirmed_without_top_down_m5_trigger():
+    daily = series(40, 100, 0.1, 100)
+    four_hour = series(40, 100, 0.2, 100)
+    hourly = series(40, 100, 0.05, 100)
+    fifteen = series(40, 100, 0.03, 100)
+    five = series(40, 100, 0.01, 100)
+    alerts = evaluate_market_radar(
+        "BTC/USDT", daily, four_hour, hourly, fifteen, five,
+        bullish_ob_near=True, bearish_ob_near=True,
+    )
+    assert all(alert.stage != "CONFIRMED" for alert in alerts)
+
+
+def test_ath_warning_uses_available_daily_high_but_waits_for_entry_trigger():
     daily = series(40, 100, 0.1, 100)
     daily[-1] = Candle(39 * 60_000, 104, 110, 100, 105, 250)
     four_hour = series(40, 120, -0.2, 100)
     hourly = series(40, 100, -0.05, 100)
     fifteen = series(40, 120, -0.03, 100)
     fifteen[-1] = Candle(39 * 60_000, 110, 111, 108, 109, 250)
+    five = series(40, 120, -0.01, 100)
 
-    alerts = evaluate_market_radar("BTC/USDT", daily, four_hour, hourly, fifteen)
+    alerts = evaluate_market_radar("BTC/USDT", daily, four_hour, hourly, fifteen, five)
     ath = next(alert for alert in alerts if alert.category == "ATH_WARNING")
-    assert ath.stage == "CONFIRMED"
+    assert ath.stage == "PRE_SIGNAL"
     assert ath.score >= 80
     assert "تاریخچه روزانه موجود" in " ".join(ath.reasons)
 
 
-def test_bottom_reversal_uses_available_daily_low_and_bullish_reversal():
+def test_bottom_reversal_uses_available_daily_low_and_waits_for_entry_trigger():
     daily = series(40, 100, 0.1, 100)
     daily[-1] = Candle(39 * 60_000, 94, 98, 90, 94.4, 250)
     four_hour = series(40, 100, 0.2, 100)
@@ -64,13 +81,13 @@ def test_bottom_reversal_uses_available_daily_low_and_bullish_reversal():
     previous_high = max(bar.high for bar in fifteen[-7:-1])
     fifteen[-1] = Candle(39 * 60_000, previous_high, previous_high + 3,
                          99, previous_high + 2, 250)
+    five = series(40, 100, 0.01, 100)
 
-    alerts = evaluate_market_radar("BTC/USDT", daily, four_hour, hourly, fifteen)
+    alerts = evaluate_market_radar("BTC/USDT", daily, four_hour, hourly, fifteen, five)
     bottom = next(alert for alert in alerts if alert.category == "BOTTOM_REVERSAL")
-    assert bottom.stage == "CONFIRMED"
+    assert bottom.stage == "PRE_SIGNAL"
     assert bottom.score >= 80
     assert "تاریخچه روزانه موجود" in " ".join(bottom.reasons)
-
 
 
 def test_order_block_confluence_adds_an_explicit_reason():
@@ -78,8 +95,10 @@ def test_order_block_confluence_adds_an_explicit_reason():
     four_hour = series(40, 100, 0.2, 100)
     hourly = series(40, 100, 0.05, 100)
     fifteen = series(40, 100, 0.03, 100)
+    five = series(40, 100, 0.01, 100)
     alerts = evaluate_market_radar(
-        "BTC/USDT", daily, four_hour, hourly, fifteen, bullish_ob_near=True
+        "BTC/USDT", daily, four_hour, hourly, fifteen, five,
+        bullish_ob_near=True,
     )
     early = next(alert for alert in alerts if alert.category == "EARLY")
     assert any("اردربلاک صعودی فعال ۴ساعته" in reason for reason in early.reasons)
@@ -90,3 +109,10 @@ def test_single_candle_breakout_is_not_counted_as_full_structure_shift():
     flat[-1] = Candle(7 * 60_000, 100, 103, 99, 102, 200)
     assert not _bullish_structure(flat)
     assert not _bearish_structure(flat)
+
+
+def test_five_minute_trigger_requires_closed_candle_breakout():
+    bars = series(5, 100, 0.01, 100)
+    assert not _five_minute_trigger(bars, "BUY")
+    bars[-1] = Candle(bars[-1].timestamp, 100.04, 100.20, 100.03, 100.18, 100)
+    assert _five_minute_trigger(bars, "BUY")
