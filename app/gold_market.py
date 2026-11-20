@@ -10,6 +10,7 @@ import sqlite3
 import time
 from dataclasses import replace
 from datetime import datetime, timezone
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -121,8 +122,17 @@ class GoldStore:
                 created_at TEXT NOT NULL
             )""")
 
+    @contextmanager
     def _connect(self):
-        return sqlite3.connect(self.database_path, timeout=30)
+        db = sqlite3.connect(self.database_path, timeout=30)
+        try:
+            yield db
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 
     def add_tick(self, timestamp_ms: int, gram18: float, usd: float | None, ounce: float | None) -> bool:
         with self._connect() as db:
