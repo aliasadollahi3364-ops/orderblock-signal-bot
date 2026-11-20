@@ -7,8 +7,12 @@ demo positions, or exchange orders are used.
 from __future__ import annotations
 
 import math
+import sys
 import time
-from datetime import datetime, timezone
+from pathlib import Path
+
+# Running a script from scripts/ puts that directory first on sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.market_data import WeexMarketData
 from app.explosive_scanner import DURATION_MS, _closed_candles, _ob_for_side
@@ -49,7 +53,7 @@ def main() -> None:
         print("WEEX MANUAL RADAR BATCH TEST (READ ONLY)")
         print("Manual whitelist: " + ", ".join(MANUAL_SYMBOLS))
         for requested in MANUAL_SYMBOLS:
-            print(f"\\n=== {requested}/USDT ===")
+            print(f"\n=== {requested}/USDT ===")
             try:
                 candidate = market_data.resolve_manual_symbol(requested)
                 now_ms = int(time.time() * 1000)
@@ -109,7 +113,7 @@ def main() -> None:
                 failed.append(f"{requested}: {type(exc).__name__}: {exc}")
                 print(f"FAIL {requested}: {type(exc).__name__}: {exc}")
 
-        print("\\n=== SUMMARY ===")
+        print("\n=== SUMMARY ===")
         print(
             f"tested={tested}/{len(MANUAL_SYMBOLS)}, "
             f"symbols_with_errors={len(failed)}, alerts={alert_count}"
