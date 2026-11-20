@@ -9,8 +9,6 @@ from app.api import app
 from app.charting import make_signal_chart
 from app.config import Settings
 from app.demo import DemoAccount
-from app.explosive_scanner import ExplosiveAlert
-from app.market_radar import RadarAlert
 from app.market_data import WeexMarketData
 from app.runtime import runtime
 from app.scanner import AutomaticScanner, open_demo_from_signal
@@ -82,54 +80,6 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
             runtime.persist_demo_state()
             if bot is not None:
                 asyncio.run_coroutine_threadsafe(send_signal_photo(signal, position), loop)
-    def handle_explosive_alert(alert: ExplosiveAlert) -> None:
-        stage = "🚨 هشدار اولیه حرکت انفجاری" if alert.stage == "EARLY" else "🔥 تأیید حرکت انفجاری"
-        side = "لانگ" if alert.side == "BUY" else "شورت"
-        reasons = "\n".join(f"• {reason}" for reason in alert.reasons)
-        timestamp = datetime.fromtimestamp(alert.timestamp / 1000, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-        send(
-            f"{stage} | {alert.symbol}\nجهت: {side} | امتیاز: {alert.score}/100\n"
-            f"ورود آزمایشی: {alert.entry:g}\nحدضرر: {alert.stop:g}\n"
-            f"TP1: {alert.tp1:g}\nTP2: {alert.tp2:g}\nTP3: {alert.tp3:g}\n"
-            f"زمان: {timestamp}\nدلایل:\n{reasons}\n"
-            "این موتور مستقل و فقط هشداردهنده است؛ معامله دمو باز نمی‌کند."
-        )
-
-    def handle_radar_alert(alert: RadarAlert) -> None:
-        category_names = {
-            "EARLY": "پیش از پامپ / انباشت احتمالی",
-            "BULLISH_BREAKOUT": "شروع حرکت صعودی",
-            "ATH_WARNING": "هشدار نزدیک سقف تاریخیِ تاریخچه موجود",
-            "BEARISH_BREAKDOWN": "شروع ریزش / شکست حمایت",
-            "BOTTOM_REVERSAL": "برگشت احتمالی از کف تاریخچه موجود",
-        }
-        stage_names = {
-            "WATCH": "👀 زیرنظر",
-            "PRE_SIGNAL": "⚠️ نزدیک به تأیید",
-            "CONFIRMED": "🚨 تأیید شرایط",
-        }
-        side = "صعودی" if alert.side == "BUY" else "نزولی"
-        timestamp = datetime.fromtimestamp(alert.timestamp / 1000, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-        reasons = "\n".join(f"• {reason}" for reason in alert.reasons)
-        send(
-            f"📡 رادار بازار | {category_names.get(alert.category, alert.category)}\n"
-            f"{stage_names.get(alert.stage, alert.stage)} | جهت: {side} | امتیاز: {alert.score}/100\n"
-            f"نماد: {alert.symbol}\nقیمت مرجع: {alert.reference_price:g}\n"
-            f"زمان کندل: {timestamp}\n"
-            + (
-                f"\n📍 برنامه مرجع ورود رادار (مشروط، نه ورود فوری):\n"
-                f"ورود پیشنهادی: {alert.entry_price:g}\nحد ضرر ساختاری: {alert.stop_loss:g}\n"
-                f"TP1 (2R): {alert.tp1:g}\nTP2 (3R): {alert.tp2:g}\nTP3 (4R): {alert.tp3:g}\n"
-                "شرط ورود: واکنش قیمت در محدوده و تأیید کندل بسته‌شده ۵دقیقه؛ اگر پولبک نداد، ورود تعقیبی نکن.\n"
-                if alert.entry_price is not None and alert.stop_loss is not None
-                and alert.tp1 is not None and alert.tp2 is not None
-                and alert.tp3 is not None else
-                "\nبرنامه ورود هنوز معتبر/قابل محاسبه نیست؛ فقط زیرنظر بگیر و وارد نشو.\n"
-            )
-            + f"\nدلایل:\n{reasons}\n"
-            + "هشدار مستقل رادار است و معامله باز نمی‌کند؛ ورود فقط پس از شرط تأیید معتبر است. فقط دمو."
-        )
-
     def handle_trade_event(event: dict) -> None:
         """Keep TP/SL milestone notifications permanently in Telegram."""
         if bot is None:
@@ -162,7 +112,7 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
     scanner = AutomaticScanner(market_data=market_data, strategy_config=runtime.strategy_config,
         universe_limit=settings.scanner_universe_limit, candidate_limit=settings.scanner_candidate_limit,
         on_signal=handle_signal, on_trade_event=handle_trade_event,
-        on_explosive_alert=handle_explosive_alert, on_radar_alert=handle_radar_alert)
+        )
     try:
         await asyncio.to_thread(scanner.run_forever, settings.scan_interval_seconds)
     finally:
