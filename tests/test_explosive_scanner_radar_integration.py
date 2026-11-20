@@ -81,6 +81,11 @@ def test_radar_sends_only_confirmed_alerts_to_telegram(monkeypatch):
         timestamp=1_800_000_000_000,
         reference_price=100.0,
         reasons=("confirmed test reason",),
+        entry_price=100.0,
+        stop_loss=98.0,
+        tp1=102.0,
+        tp2=103.0,
+        tp3=104.0,
     )
 
     monkeypatch.setattr(
@@ -91,4 +96,29 @@ def test_radar_sends_only_confirmed_alerts_to_telegram(monkeypatch):
     scanner.scan_once(["MANUAL/USDT:USDT"])
 
     assert delivered == [expected]
-    assert scanner._radar_state[("MANUAL/USDT:USDT", "SELL")][0] == "CONFIRMED"
+    assert scanner._radar_state[("MANUAL/USDT:USDT", "SELL")][0] == "CONFIRMED"\ndef test_confirmed_radar_without_complete_plan_is_not_sent(monkeypatch):
+    market_data = FakePublicMarketData()
+    delivered = []
+    alert = RadarAlert(
+        symbol="MANUAL/USDT:USDT",
+        category="EARLY",
+        side="BUY",
+        stage="CONFIRMED",
+        score=90,
+        timestamp=1_800_000_000_000,
+        reference_price=100.0,
+        reasons=("missing plan",),
+        entry_price=100.0,
+        stop_loss=98.0,
+        tp1=102.0,
+        tp2=None,
+        tp3=104.0,
+    )
+    monkeypatch.setattr(
+        "app.explosive_scanner.evaluate_market_radar",
+        lambda *args, **kwargs: [alert],
+    )
+    scanner = ExplosiveMoveScanner(market_data, on_radar_alert=delivered.append)
+    scanner.scan_once(["MANUAL/USDT:USDT"])
+    assert delivered == []
+\n
