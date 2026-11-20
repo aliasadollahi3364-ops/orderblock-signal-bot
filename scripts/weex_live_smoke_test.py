@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.market_data import WeexMarketData
 
 
-TIMEFRAMES = ("1d", "4h", "1h", "15m", "5m")
+TIMEFRAME_MS = {"1d": 86_400_000, "4h": 14_400_000, "1h": 3_600_000, "15m": 900_000, "5m": 300_000}\nTIMEFRAMES = tuple(TIMEFRAME_MS)
 
 
 def main() -> None:
@@ -44,11 +44,20 @@ def main() -> None:
                 if not valid:
                     raise RuntimeError("no valid OHLCV rows in response")
 
-                latest = valid[-1]
-                age_minutes = max(0, (now_ms - int(latest[0])) // 60_000)
+                closed = [
+                    row for row in valid
+                    if int(row[0]) + TIMEFRAME_MS[timeframe] <= now_ms
+                ]
+                if not closed:
+                    raise RuntimeError("no fully closed candles in response")
+                latest_closed = closed[-1]
+                age_since_close = max(
+                    0, (now_ms - (int(latest_closed[0]) + TIMEFRAME_MS[timeframe])) // 60_000
+                )
                 print(
-                    f"PASS {timeframe}: rows={len(valid)}, "
-                    f"latest_close={latest[4]}, latest_candle_age_min={age_minutes}"
+                    f"PASS {timeframe}: rows={len(valid)}, closed_rows={len(closed)}, "
+                    f"last_closed_close={latest_closed[4]}, "
+                    f"minutes_since_close={age_since_close}"
                 )
             except Exception as exc:  # report each timeframe independently
                 failures.append(f"{timeframe}: {type(exc).__name__}: {exc}")
