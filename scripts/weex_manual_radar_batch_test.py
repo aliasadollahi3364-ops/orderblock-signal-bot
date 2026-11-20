@@ -19,9 +19,9 @@ from app.explosive_scanner import DURATION_MS, _closed_candles, _ob_for_side
 from app.market_radar import evaluate_market_radar
 
 
-# All eight symbols are present in the user's current manual-only list.
+# These additional symbols are all present in the user's current manual-only list.
 MANUAL_SYMBOLS = (
-    "BTC", "ETH", "SOL", "XRP", "DOGE", "LINK", "AVAX", "SUI",
+    "ZEC", "BCH", "DOT", "TRX", "BNB", "MANA", "HYPE", "XLM",
 )
 LIMITS = {"1d": 400, "4h": 220, "1h": 120, "15m": 320, "5m": 120}
 TIMEFRAMES = tuple(LIMITS)
