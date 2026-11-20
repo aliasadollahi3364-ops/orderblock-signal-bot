@@ -10,6 +10,7 @@ from app.charting import make_signal_chart
 from app.config import Settings
 from app.demo import DemoAccount
 from app.explosive_scanner import ExplosiveAlert
+from app.market_radar import RadarAlert
 from app.market_data import WeexMarketData
 from app.runtime import runtime
 from app.scanner import AutomaticScanner, open_demo_from_signal
@@ -94,6 +95,39 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
             "این موتور مستقل و فقط هشداردهنده است؛ معامله دمو باز نمی‌کند."
         )
 
+    def handle_radar_alert(alert: RadarAlert) -> None:
+        category_names = {
+            "EARLY": "پیش از پامپ / انباشت احتمالی",
+            "BULLISH_BREAKOUT": "شروع حرکت صعودی",
+            "ATH_WARNING": "هشدار نزدیک سقف تاریخیِ تاریخچه موجود",
+            "BEARISH_BREAKDOWN": "شروع ریزش / شکست حمایت",
+            "BOTTOM_REVERSAL": "برگشت احتمالی از کف تاریخچه موجود",
+        }
+        stage_names = {
+            "WATCH": "👀 زیرنظر",
+            "PRE_SIGNAL": "⚠️ نزدیک به تأیید",
+            "CONFIRMED": "🚨 تأیید شرایط",
+        }
+        side = "صعودی" if alert.side == "BUY" else "نزولی"
+        timestamp = datetime.fromtimestamp(alert.timestamp / 1000, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        reasons = "\n".join(f"• {reason}" for reason in alert.reasons)
+        send(
+            f"📡 رادار بازار | {category_names.get(alert.category, alert.category)}\n"
+            f"{stage_names.get(alert.stage, alert.stage)} | جهت: {side} | امتیاز: {alert.score}/100\n"
+            f"نماد: {alert.symbol}\nقیمت مرجع: {alert.reference_price:g}\n"
+            f"زمان کندل: {timestamp}\n"
+            + (
+                f"\n📍 برنامه ورود رادار (فقط در سطح تأییدشده):\n"
+                f"ورود: {alert.entry_price:g}\nحد ضرر ساختاری: {alert.stop_loss:g}\n"
+                f"TP1 (2R): {alert.tp1:g}\nTP2 (3R): {alert.tp2:g}\nTP3 (4R): {alert.tp3:g}\n"
+                if alert.stage == "CONFIRMED" and alert.entry_price is not None
+                and alert.stop_loss is not None and alert.tp1 is not None
+                and alert.tp2 is not None and alert.tp3 is not None else ""
+            )
+            + f"\nدلایل:\n{reasons}\n"
+            + "هشدار تحلیلی مستقل است؛ دستور معامله یا سیگنال استراتژی اصلی نیست. فقط دمو."
+        )
+
     def handle_trade_event(event: dict) -> None:
         """Keep TP/SL milestone notifications permanently in Telegram."""
         if bot is None:
@@ -126,7 +160,7 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
     scanner = AutomaticScanner(market_data=market_data, strategy_config=runtime.strategy_config,
         universe_limit=settings.scanner_universe_limit, candidate_limit=settings.scanner_candidate_limit,
         on_signal=handle_signal, on_trade_event=handle_trade_event,
-        on_explosive_alert=handle_explosive_alert)
+        on_explosive_alert=handle_explosive_alert, on_radar_alert=handle_radar_alert)
     try:
         await asyncio.to_thread(scanner.run_forever, settings.scan_interval_seconds)
     finally:
