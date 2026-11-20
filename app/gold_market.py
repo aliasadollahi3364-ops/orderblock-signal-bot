@@ -137,7 +137,7 @@ class GoldStore:
         with self._connect() as db:
             for ts, price in points:
                 cur = db.execute(
-                    "INSERT OR IGNORE INTO gold_ticks(timestamp_ms,gram18) VALUES(?,?,?)".replace("VALUES(?,?,?)", "VALUES(?,?)"),
+                    "INSERT OR IGNORE INTO gold_ticks(timestamp_ms,gram18) VALUES(?,?)",
                     (ts, price),
                 )
                 inserted += max(cur.rowcount, 0)
@@ -285,7 +285,7 @@ class GoldMarketService:
             f"قیمت هر گرم: {gold_price} تومان\n"
             f"آخرین به‌روزرسانی: {updated}\n"
             f"وضعیت موتور تحلیل: {warm}\n"
-            "تایم‌فریم‌ها: D1 / 4H / 1H / 15m / 5m\n"
+            "تایم‌فریم سیگنال: 4H + 15m (مطابق استراتژی اصلی)\n"
             "سیگنال‌ها: فقط تأییدشده | معاملات واقعی: خاموش\n"
             "قیمت‌ها از طلاسنج · https://talasanj.info"
             f"{error}"
