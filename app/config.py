@@ -8,6 +8,10 @@ class Settings(BaseSettings):
 
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
+    talasanj_api_key: str = ""
+    talasanj_client_name: str = "OrderBlock Signal Bot"
+    talasanj_client_url: str = "https://github.com/aliasadollahi3364-ops/orderblock-signal-bot"
+    gold_poll_seconds: int = Field(default=20, ge=20, le=300)
     exchange_id: str = "weex"
     quote_currency: str = "USDT"
     timeframe_entry: str = "15m"
