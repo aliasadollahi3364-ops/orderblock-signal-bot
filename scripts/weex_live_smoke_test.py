@@ -7,6 +7,11 @@ from __future__ import annotations
 
 import math
 from datetime import datetime, timezone
+from pathlib import Path
+import sys
+
+# Running a script from scripts/ puts that directory first on sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.market_data import WeexMarketData
 
