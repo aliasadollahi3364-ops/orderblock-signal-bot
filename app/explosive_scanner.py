@@ -331,21 +331,42 @@ class ExplosiveMoveScanner:
                     radar_price = bars["15m"][-1].close
                     bullish_ob_near, _, _ = _ob_for_side(bars["4h"], "BUY", radar_price)
                     bearish_ob_near, _, _ = _ob_for_side(bars["4h"], "SELL", radar_price)
-                    for radar_alert in evaluate_market_radar(
+                    radar_alerts = evaluate_market_radar(
                         symbol, daily, bars["4h"], bars["1h"], bars["15m"], bars["5m"],
                         bullish_ob_near=bullish_ob_near,
                         bearish_ob_near=bearish_ob_near,
-                    ):
-                        key = (symbol, radar_alert.category)
+                    )
+                    # One best radar message per symbol and direction prevents
+                    # several categories from flooding Telegram in one scan.
+                    best_by_side: dict[str, RadarAlert] = {}
+                    for candidate in radar_alerts:
+                        current = best_by_side.get(candidate.side)
+                        if current is None or (candidate.score, candidate.stage) > (current.score, current.stage):
+                            best_by_side[candidate.side] = candidate
+                    rank = {"WATCH": 1, "PRE_SIGNAL": 2, "CONFIRMED": 3}
+                    for radar_alert in best_by_side.values():
+                        key = (symbol, radar_alert.side)
                         previous = self._radar_state.get(key)
-                        rank = {"WATCH": 1, "PRE_SIGNAL": 2, "CONFIRMED": 3}
                         if previous and (
                             rank[previous[0]] >= rank[radar_alert.stage]
                             and now_ms - previous[1] < 24 * 60 * 60 * 1000
                         ):
                             continue
                         self._radar_state[key] = (radar_alert.stage, now_ms)
-                        self.on_radar_alert(radar_alert)
+                        # WATCH and PRE_SIGNAL are internal radar states only.
+                        # Telegram receives actionable alerts after confirmation.
+                        has_complete_plan = all(
+                            value is not None
+                            for value in (
+                                radar_alert.entry_price,
+                                radar_alert.stop_loss,
+                                radar_alert.tp1,
+                                radar_alert.tp2,
+                                radar_alert.tp3,
+                            )
+                        )
+                        if radar_alert.stage == "CONFIRMED" and has_complete_plan:
+                            self.on_radar_alert(radar_alert)
                 trades = self.market_data.fetch_trades(symbol)
                 book = self.market_data.fetch_orderbook(symbol)
                 for side in ("BUY", "SELL"):

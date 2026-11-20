@@ -117,15 +117,17 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
             f"نماد: {alert.symbol}\nقیمت مرجع: {alert.reference_price:g}\n"
             f"زمان کندل: {timestamp}\n"
             + (
-                f"\n📍 برنامه ورود رادار (فقط در سطح تأییدشده):\n"
-                f"ورود: {alert.entry_price:g}\nحد ضرر ساختاری: {alert.stop_loss:g}\n"
+                f"\n📍 برنامه مرجع ورود رادار (مشروط، نه ورود فوری):\n"
+                f"ورود پیشنهادی: {alert.entry_price:g}\nحد ضرر ساختاری: {alert.stop_loss:g}\n"
                 f"TP1 (2R): {alert.tp1:g}\nTP2 (3R): {alert.tp2:g}\nTP3 (4R): {alert.tp3:g}\n"
-                if alert.stage == "CONFIRMED" and alert.entry_price is not None
-                and alert.stop_loss is not None and alert.tp1 is not None
-                and alert.tp2 is not None and alert.tp3 is not None else ""
+                "شرط ورود: واکنش قیمت در محدوده و تأیید کندل بسته‌شده ۵دقیقه؛ اگر پولبک نداد، ورود تعقیبی نکن.\n"
+                if alert.entry_price is not None and alert.stop_loss is not None
+                and alert.tp1 is not None and alert.tp2 is not None
+                and alert.tp3 is not None else
+                "\nبرنامه ورود هنوز معتبر/قابل محاسبه نیست؛ فقط زیرنظر بگیر و وارد نشو.\n"
             )
             + f"\nدلایل:\n{reasons}\n"
-            + "هشدار تحلیلی مستقل است؛ دستور معامله یا سیگنال استراتژی اصلی نیست. فقط دمو."
+            + "هشدار مستقل رادار است و معامله باز نمی‌کند؛ ورود فقط پس از شرط تأیید معتبر است. فقط دمو."
         )
 
     def handle_trade_event(event: dict) -> None:
