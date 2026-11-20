@@ -355,7 +355,17 @@ class ExplosiveMoveScanner:
                         self._radar_state[key] = (radar_alert.stage, now_ms)
                         # WATCH and PRE_SIGNAL are internal radar states only.
                         # Telegram receives actionable alerts after confirmation.
-                        if radar_alert.stage == "CONFIRMED":
+                        has_complete_plan = all(
+                            value is not None
+                            for value in (
+                                radar_alert.entry_price,
+                                radar_alert.stop_loss,
+                                radar_alert.tp1,
+                                radar_alert.tp2,
+                                radar_alert.tp3,
+                            )
+                        )
+                        if radar_alert.stage == "CONFIRMED" and has_complete_plan:
                             self.on_radar_alert(radar_alert)
                 trades = self.market_data.fetch_trades(symbol)
                 book = self.market_data.fetch_orderbook(symbol)
