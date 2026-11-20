@@ -250,8 +250,10 @@ class GoldMarketService:
         gold = prices.get("gram18") or {}
         usd = prices.get("usd") or {}
         ounce = prices.get("ounce") or {}
-        updated = payload.get("updated_at") or gold.get("updated_at") or datetime.now(timezone.utc).isoformat()
+        updated = gold.get("updated_at") or payload.get("updated_at") or datetime.now(timezone.utc).isoformat()
         ts = _timestamp_ms(updated)
+        if int(time.time() * 1000) - ts > 180_000:
+            raise RuntimeError("Talasanj 18k gold price is older than 3 minutes; skipping candle and signal generation.")
         self.latest_prices = {
             "gram18": float(gold["price"]),
             "usd": float(usd["price"]) if usd.get("price") else None,
