@@ -54,6 +54,33 @@ def _ema(values: list[float], length: int) -> float | None:
     return value
 
 
+def _market_bias(daily: list[Candle], four_hour: list[Candle]) -> str:
+    """Use D1 EMA20 and H4 six-candle slope; disagreeing frames mean neutral."""
+    ema = _ema([bar.close for bar in daily], 20)
+    if ema is None or len(four_hour) < 6:
+        return "NEUTRAL"
+    daily_up = daily[-1].close > ema
+    daily_down = daily[-1].close < ema
+    h4_up = four_hour[-1].close > four_hour[-6].close
+    h4_down = four_hour[-1].close < four_hour[-6].close
+    if daily_up and h4_up:
+        return "BUY"
+    if daily_down and h4_down:
+        return "SELL"
+    return "NEUTRAL"
+
+
+def _apply_market_alignment(score: int, reasons: list[str], side: str, bias: str) -> int:
+    if bias == side:
+        reasons.append("هم‌جهتی با روند اصلی بازار در D1 و H4")
+        return score + 12
+    if bias in {"BUY", "SELL"}:
+        reasons.append("ناهم‌جهتی با روند اصلی بازار؛ اولویت و امتیاز کاهش یافت")
+        return score - 12
+    reasons.append("روند اصلی بازار خنثی یا نامشخص است")
+    return score
+
+
 def _volume_ratio(bars: list[Candle], lookback: int = 20) -> float:
     if len(bars) < lookback + 1:
         return 0.0
@@ -204,7 +231,9 @@ def _alert(
         return None
     if stage == "CONFIRMED" and not allow_confirmed:
         stage = "PRE_SIGNAL"
-    plan = _entry_plan(side, entry_bars or []) if stage == "CONFIRMED" else None
+    # A conditional plan is useful before confirmation too; the Telegram text
+    # must label it as a reference, never as an immediate entry instruction.
+    plan = _entry_plan(side, entry_bars or [])
     if stage == "CONFIRMED" and plan is None:
         stage = "PRE_SIGNAL"
     reference_bar = entry_bars[-1] if stage == "CONFIRMED" and entry_bars else bar
@@ -237,6 +266,7 @@ def evaluate_market_radar(
 
     alerts: list[RadarAlert] = []
     d, m = daily[-1], fifteen_minute[-1]
+    market_bias = _market_bias(daily, four_hour)
     vol = _volume_ratio(fifteen_minute)
     daily_vol = _volume_ratio(daily)
     compressed = _range_compression(hourly)
@@ -276,6 +306,7 @@ def evaluate_market_radar(
     if not bullish_break and not bearish_break:
         score += 10
         why.append("هنوز شکست نهایی رخ نداده")
+    score = _apply_market_alignment(score, why, "BUY", market_bias)
     item = _alert(symbol, "EARLY", "BUY", score, m, why, bull_confirmed, five_minute)
     if item:
         alerts.append(item)
@@ -285,6 +316,9 @@ def evaluate_market_radar(
     if bullish_break:
         score += 35
         why.append("شکست سقف ۲۰ کندل قبلی ۱۵دقیقه")
+    elif m.close >= prior_high * 0.985 and bull:
+        score += 22
+        why.append("هشدار زودهنگام: قیمت به مقاومت نزدیک شده و ساختار صعودی است؛ هنوز شکست رخ نداده")
     if vol >= 1.8:
         score += 25
         why.append("حجم شکست بالاتر از میانگین")
@@ -301,6 +335,7 @@ def evaluate_market_radar(
         score += 10
         why.append("وجود اردربلاک صعودی فعال ۴ساعته نزدیک قیمت")
     why.extend(bull_tf_reasons if bull_confirmed else [])
+    score = _apply_market_alignment(score, why, "BUY", market_bias)
     item = _alert(symbol, "BULLISH_BREAKOUT", "BUY", score, m, why, bull_confirmed, five_minute)
     if item:
         alerts.append(item)
@@ -329,6 +364,7 @@ def evaluate_market_radar(
         score += 10
         why.append("نزدیکی قیمت به اردربلاک نزولی فعال ۴ساعته")
     why.extend(bear_tf_reasons if bear_confirmed else [])
+    score = _apply_market_alignment(score, why, "SELL", market_bias)
     item = _alert(symbol, "ATH_WARNING", "SELL", score, d, why, bear_confirmed, five_minute)
     if item:
         alerts.append(item)
@@ -338,6 +374,9 @@ def evaluate_market_radar(
     if bearish_break:
         score += 35
         why.append("شکست کف ۲۰ کندل قبلی ۱۵دقیقه")
+    elif m.close <= prior_low * 1.015 and bear:
+        score += 22
+        why.append("هشدار زودهنگام: قیمت به حمایت نزدیک شده و ساختار نزولی است؛ هنوز شکست رخ نداده")
     if vol >= 1.8:
         score += 25
         why.append("افزایش حجم هنگام شکست حمایت")
@@ -354,6 +393,7 @@ def evaluate_market_radar(
         score += 10
         why.append("وجود اردربلاک نزولی فعال ۴ساعته نزدیک قیمت")
     why.extend(bear_tf_reasons if bear_confirmed else [])
+    score = _apply_market_alignment(score, why, "SELL", market_bias)
     item = _alert(symbol, "BEARISH_BREAKDOWN", "SELL", score, m, why, bear_confirmed, five_minute)
     if item:
         alerts.append(item)
@@ -382,6 +422,7 @@ def evaluate_market_radar(
         score += 10
         why.append("نزدیکی قیمت به اردربلاک صعودی فعال ۴ساعته")
     why.extend(bull_tf_reasons if bull_confirmed else [])
+    score = _apply_market_alignment(score, why, "BUY", market_bias)
     item = _alert(symbol, "BOTTOM_REVERSAL", "BUY", score, d, why, bull_confirmed, five_minute)
     if item:
         alerts.append(item)
