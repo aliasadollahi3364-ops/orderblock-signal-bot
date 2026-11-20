@@ -19,9 +19,9 @@ from app.explosive_scanner import DURATION_MS, _closed_candles, _ob_for_side
 from app.market_radar import evaluate_market_radar
 
 
-# This fifth batch is drawn only from the user's current manual-only list.
+# This sixth batch is drawn only from the user's current manual-only list.
 MANUAL_SYMBOLS = (
-    "AAVE", "ALGO", "ANKR", "API3", "APT", "ATOM", "ASTER", "AXS",
+    "ADA", "BAND", "BANK", "BAT", "BCH", "BICO", "BLUR", "BNB",
 )
 LIMITS = {"1d": 400, "4h": 220, "1h": 120, "15m": 320, "5m": 120}
 TIMEFRAMES = tuple(LIMITS)
