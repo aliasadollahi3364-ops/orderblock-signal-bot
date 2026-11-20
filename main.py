@@ -10,6 +10,7 @@ from app.charting import make_signal_chart
 from app.config import Settings
 from app.demo import DemoAccount
 from app.market_data import WeexMarketData
+from app.gold_market import GoldMarketService, format_gold_signal
 from app.runtime import runtime
 from app.scanner import AutomaticScanner, open_demo_from_signal
 from app.storage import SQLiteStore
@@ -118,6 +119,41 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
         market_data.close()
         if bot is not None: await bot.shutdown()
 
+async def run_gold_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> None:
+    """Independent Iranian 18k-gold signal stream; never opens demo or live orders."""
+    if not settings.talasanj_api_key:
+        logger.info("Gold scanner disabled: configure TALASANJ_API_KEY after creating a free Talasanj key.")
+        return
+    service = GoldMarketService(
+        api_key=settings.talasanj_api_key,
+        database_path=settings.database_path,
+        strategy_config=runtime.strategy_config,
+        client_name=settings.talasanj_client_name,
+        client_url=settings.talasanj_client_url,
+    )
+    runtime.gold_market = service
+    bot = Bot(token=settings.telegram_bot_token) if settings.telegram_bot_token and settings.telegram_chat_id else None
+    if bot is not None:
+        await bot.initialize()
+    logger.info("Iranian 18k gold data service started; prices are sampled every %s seconds.", settings.gold_poll_seconds)
+    try:
+        while True:
+            try:
+                signals = await asyncio.to_thread(service.poll_once)
+                for signal in signals:
+                    message = format_gold_signal(signal)
+                    logger.info("Confirmed 18k gold signal: %s %s", signal.side, signal.method)
+                    if bot is not None:
+                        await bot.send_message(chat_id=settings.telegram_chat_id, text=message)
+            except Exception as exc:
+                service.last_error = str(exc)[:400]
+                logger.exception("Gold market polling failed")
+            await asyncio.sleep(settings.gold_poll_seconds)
+    finally:
+        if bot is not None:
+            await bot.shutdown()
+
+
 async def main() -> None:
     settings = Settings()
     settings.assert_demo_only()
@@ -132,7 +168,7 @@ async def main() -> None:
     loop = asyncio.get_running_loop()
     server = uvicorn.Server(uvicorn.Config(app, host=settings.host, port=settings.port, log_level="info"))
     await asyncio.gather(server.serve(), run_telegram(settings.telegram_bot_token, settings.telegram_chat_id),
-                         run_scanner(settings, loop))
+                         run_scanner(settings, loop), run_gold_scanner(settings, loop))
 
 if __name__ == "__main__":
     asyncio.run(main())
