@@ -96,7 +96,8 @@ def test_radar_sends_only_confirmed_alerts_to_telegram(monkeypatch):
     scanner.scan_once(["MANUAL/USDT:USDT"])
 
     assert delivered == [expected]
-    assert scanner._radar_state[("MANUAL/USDT:USDT", "SELL")][0] == "CONFIRMED"\ndef test_confirmed_radar_without_complete_plan_is_not_sent(monkeypatch):
+    assert scanner._radar_state[("MANUAL/USDT:USDT", "SELL")][0] == "CONFIRMED"
+def test_confirmed_radar_without_complete_plan_is_not_sent(monkeypatch):
     market_data = FakePublicMarketData()
     delivered = []
     alert = RadarAlert(
@@ -121,4 +122,4 @@ def test_radar_sends_only_confirmed_alerts_to_telegram(monkeypatch):
     scanner = ExplosiveMoveScanner(market_data, on_radar_alert=delivered.append)
     scanner.scan_once(["MANUAL/USDT:USDT"])
     assert delivered == []
-\n
+
