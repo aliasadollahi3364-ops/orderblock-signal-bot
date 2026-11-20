@@ -35,6 +35,22 @@ On a hosting provider, the database file must live on a persistent disk/volume. 
 - Liquidity ranking currently uses 24h quote volume and bid/ask spread; exchange-wide order-book depth ranking is not implemented.
 - Live WEEX responses and candle-by-candle TradingView parity still require verification.
 
+## Iranian 18k gold (Talasanj)
+
+An independent, signal-only Iranian 18k gold data path is available behind the optional `TALASANJ_API_KEY` setting.
+
+- Get a free API key from Telegram bot `@taalasanj_bot` → API برنامه‌نویسان → ساخت کلید.
+- Store it only as the HOKAS/host environment variable `TALASANJ_API_KEY`; never paste it into Telegram chats, GitHub, or source code.
+- The service reads `gram18`, `usd`, and `ounce` from Talasanj `GET /api/v1/prices`, samples at the provider's 20-second cadence, and persists samples/candles in the same SQLite file under separate `gold_*` tables.
+- Local 5m, 15m, 1h and 4h candles are built from the sampled Iranian 18k price. Intraday minute history is seeded once at startup when available.
+- The existing strategy configuration is reused without changing the WEEX scanner or its manual symbol list. The gold signal engine evaluates confirmed 4h structure and 15m entries; it does not place orders or alter the USDT demo ledger.
+- Gold status is available through Telegram `/gold`. The signal caption includes entry, stop, 1R/2R/3R targets, and a link attribution to Talasanj.
+- The free API requires visible attribution: `قیمت‌ها از طلاسنج · https://talasanj.info`. Do not remove it.
+- This provider is indicative and not guaranteed execution-grade market data. Sampled prices do not contain real traded volume; AVP/volume-profile filters are therefore not fabricated or enabled.
+- The supplied strategy has a 4h SMA200 filter. The engine waits until enough locally collected 4h candles exist; it must not emit a signal during warm-up. Historical API coverage is intraday minute points for the current day and daily closes for longer ranges, not historical 4h OHLC. Consequently, a long warm-up may be required after first installation.
+
+If the API key is absent, the gold scanner remains disabled and all existing crypto functionality continues unchanged.
+
 ## Run locally
 
 Install dependencies with `pip install -r requirements.txt`, copy `.env.example` to `.env`, and start with `python main.py`. Set Telegram credentials to enable Telegram polling. Never commit secrets.
