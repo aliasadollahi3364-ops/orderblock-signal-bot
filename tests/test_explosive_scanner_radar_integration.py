@@ -92,4 +92,3 @@ def test_radar_sends_only_confirmed_alerts_to_telegram(monkeypatch):
 
     assert delivered == [expected]
     assert scanner._radar_state[("MANUAL/USDT:USDT", "SELL")][0] == "CONFIRMED"
-\n
