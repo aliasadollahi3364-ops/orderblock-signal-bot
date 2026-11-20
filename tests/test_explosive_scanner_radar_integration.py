@@ -66,5 +66,30 @@ def test_radar_fetches_all_top_down_timeframes_and_only_manual_requested_symbols
     for timeframe in ("1d", "4h", "1h", "15m", "5m"):
         assert ("MANUAL/USDT:USDT", timeframe) in market_data.requests
     assert {symbol for symbol, _ in market_data.requests} == {"MANUAL/USDT:USDT"}
+    assert delivered == []
+    assert scanner._radar_state[("MANUAL/USDT:USDT", "BUY")][0] == "WATCH"
+
+def test_radar_sends_only_confirmed_alerts_to_telegram(monkeypatch):
+    market_data = FakePublicMarketData()
+    delivered = []
+    expected = RadarAlert(
+        symbol="MANUAL/USDT:USDT",
+        category="BEARISH_BREAKDOWN",
+        side="SELL",
+        stage="CONFIRMED",
+        score=85,
+        timestamp=1_800_000_000_000,
+        reference_price=100.0,
+        reasons=("confirmed test reason",),
+    )
+
+    monkeypatch.setattr(
+        "app.explosive_scanner.evaluate_market_radar",
+        lambda *args, **kwargs: [expected],
+    )
+    scanner = ExplosiveMoveScanner(market_data, on_radar_alert=delivered.append)
+    scanner.scan_once(["MANUAL/USDT:USDT"])
+
     assert delivered == [expected]
-    assert scanner._radar_state[("MANUAL/USDT:USDT", "EARLY")][0] == "WATCH"
+    assert scanner._radar_state[("MANUAL/USDT:USDT", "SELL")][0] == "CONFIRMED"
+\n
