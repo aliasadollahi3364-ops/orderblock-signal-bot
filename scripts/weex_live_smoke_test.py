@@ -16,7 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.market_data import WeexMarketData
 
 
-TIMEFRAME_MS = {"1d": 86_400_000, "4h": 14_400_000, "1h": 3_600_000, "15m": 900_000, "5m": 300_000}\nTIMEFRAMES = tuple(TIMEFRAME_MS)
+TIMEFRAME_MS = {"1d": 86_400_000, "4h": 14_400_000, "1h": 3_600_000, "15m": 900_000, "5m": 300_000}
+TIMEFRAMES = tuple(TIMEFRAME_MS)
 
 
 def main() -> None:
