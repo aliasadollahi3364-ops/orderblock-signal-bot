@@ -98,7 +98,8 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
                 f"📊 شکست خط روند + اردربلاک | {signal.symbol}\n"
                 f"لیمیت ۱: {near:g} | لیمیت ۲: {deep:g}\n"
                 f"حد ضرر: {signal.stop:g}\n"
-                "اهداف هر لیمیت جداگانه روی نمودار مشخص شده‌اند. فقط حساب دمو."
+                "اهداف روی نمودار برای هر ورود تخمینی‌اند؛ پس از پرشدن سفارش‌ها، میانگین ورود و اهداف مشترک پوزیشن به‌روز می‌شوند.\\n"
+                "مارجین هر لیمیت: ۵ دلار | حداکثر مارجین کل: ۱۰ دلار. فقط حساب دمو."
             )
             await bot.send_photo(chat_id=settings.telegram_chat_id, photo=chart, caption=caption)
         except Exception:
@@ -225,9 +226,12 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
     def handle_pending_event(event: dict) -> None:
         if event.get("type") == "LIMIT_FILLED":
             message = (
-                f"✅ لیمیت شماره {event['leg']} پر شد | {event['symbol']}\n"
-                f"جهت: {event['side']}\nقیمت پرشدن دمو: {event['price']:g}\n"
-                f"زمان: {event['time']}\nحساب دمو؛ معاملات واقعی خاموش"
+                f"✅ لیمیت شماره {event['leg']} پر شد | {event['symbol']}\\n"
+                f"جهت: {event['side']}\\nقیمت پرشدن این لیمیت: {event['price']:g}\\n"
+                f"میانگین ورود پوزیشن واحد: {event['average_entry']:g}\\n"
+                f"مارجین استفاده‌شده: {event['margin_allocated']:g} دلار\\n"
+                f"اهداف مشترک: TP1 {event['tp1']:g} | TP2 {event['tp2']:g} | TP3 {event['tp3']:g}\\n"
+                f"زمان: {event['time']}\\nحساب دمو؛ معاملات واقعی خاموش"
             )
         else:
             message = (
