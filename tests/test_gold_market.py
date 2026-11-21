@@ -35,3 +35,13 @@ def test_gold_store_deduplicates_signal_events(tmp_path):
     )
     assert store.claim_signal(signal)
     assert not store.claim_signal(signal)
+
+
+
+def test_gold_store_tracks_market_series_and_daily_report_once(tmp_path):
+    store = GoldStore(str(tmp_path / "gold-report.sqlite3"))
+    assert store.add_tick(1_000, 25_000_000, 270_000, 3_500.0)
+    assert store.series_ticks("usd") == [(1_000, 270_000.0)]
+    assert store.series_ticks("ounce") == [(1_000, 3_500.0)]
+    assert store.claim_daily_report("2026-11-21")
+    assert not store.claim_daily_report("2026-11-21")
