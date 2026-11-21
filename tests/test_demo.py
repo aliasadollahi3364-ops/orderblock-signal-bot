@@ -55,6 +55,19 @@ def test_partial_limit_position_restores_allocated_margin_and_accepts_second_leg
     assert restored.margin_used == pytest.approx(5.0)
     assert position.quantity_initial == pytest.approx(0.125 + 12.5 / 90.0)
 
+
+def test_limit_legs_keep_independent_targets_and_report_leg_number():
+    account = DemoAccount(fee_rate=0)
+    account.add_limit_fill("BTC/USDT", Side.LONG, 100.0, 95.0, leg_number=1)
+    account.add_limit_fill("BTC/USDT", Side.LONG, 98.0, 95.0, leg_number=2)
+    events = account.process_candle(high=102.0, low=98.5, symbol="BTC/USDT")
+    assert [(event["type"], event["leg"]) for event in events] == [("TP1", 2)]
+    position = account.positions["BTC/USDT"]
+    assert position.legs[0]["tp1"] == pytest.approx(105.0)
+    assert position.legs[1]["tp1"] == pytest.approx(101.0)
+    assert position.legs[0]["tp1_done"] is False
+    assert position.legs[1]["tp1_done"] is True
+
 def test_tp1_and_tp2_move_stop_as_agreed():
     account = DemoAccount(fee_rate=0)
     position = account.open_position("BTC/USDT", Side.LONG, 100.0, 98.0)
