@@ -1,4 +1,4 @@
-""""Atomic SQLite persistence for the internal demo account."""
+"""Atomic SQLite persistence for the internal demo account."""
 from __future__ import annotations
 
 import json
@@ -80,34 +80,71 @@ class SQLiteStore:
         data["side"] = position.side.value
         return data
 
+    @staticmethod
+    def _pending_rows(book: PendingLimitBook) -> list[tuple[str, str]]:
+        rows = []
+        for symbol, setup in book.setups.items():
+            payload = {
+                "symbol": setup.symbol, "side": setup.side,
+                "created_at": setup.created_at,
+                "expires_after_bars": setup.expires_after_bars,
+                "invalidation": setup.invalidation, "stop": setup.stop,
+                "ob_top": setup.ob_top, "ob_bottom": setup.ob_bottom,
+                "last_processed_bar": setup.last_processed_bar,
+                "limits": [{
+                    "number": leg.number, "price": leg.price,
+                    "status": leg.status.value, "filled_at": leg.filled_at,
+                    "cancelled_at": leg.cancelled_at,
+                    "cancel_reason": leg.cancel_reason,
+                } for leg in setup.limits],
+            }
+            rows.append((symbol, json.dumps(payload, separators=(",", ":"))))
+        return rows
+
+    @staticmethod
+    def _write_account(db, account: DemoAccount, events: list[dict[str, Any]]) -> None:
+        db.execute("""
+            INSERT INTO demo_account
+                (id, initial_balance, margin_per_trade, leverage, fee_rate, balance)
+            VALUES (1, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                initial_balance=excluded.initial_balance,
+                margin_per_trade=excluded.margin_per_trade,
+                leverage=excluded.leverage,
+                fee_rate=excluded.fee_rate,
+                balance=excluded.balance
+        """, (
+            account.initial_balance, account.margin_per_trade, account.leverage,
+            account.fee_rate, float(account.balance or 0.0),
+        ))
+        db.execute("DELETE FROM demo_positions")
+        db.executemany(
+            "INSERT INTO demo_positions(symbol, payload) VALUES (?, ?)",
+            [(symbol, json.dumps(SQLiteStore._position_payload(pos), separators=(",", ":")))
+             for symbol, pos in account.positions.items()],
+        )
+        db.execute("DELETE FROM demo_events")
+        db.executemany(
+            "INSERT INTO demo_events(payload) VALUES (?)",
+            [(json.dumps(event, separators=(",", ":"), default=str),) for event in events],
+        )
+
     def save_state(self, account: DemoAccount, events: list[dict[str, Any]]) -> None:
         """Replace the account snapshot and event history atomically."""
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            db.execute("""
-                INSERT INTO demo_account
-                    (id, initial_balance, margin_per_trade, leverage, fee_rate, balance)
-                VALUES (1, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    initial_balance=excluded.initial_balance,
-                    margin_per_trade=excluded.margin_per_trade,
-                    leverage=excluded.leverage,
-                    fee_rate=excluded.fee_rate,
-                    balance=excluded.balance
-            """, (
-                account.initial_balance, account.margin_per_trade, account.leverage,
-                account.fee_rate, float(account.balance or 0.0),
-            ))
-            db.execute("DELETE FROM demo_positions")
+            self._write_account(db, account, events)
+
+    def save_runtime_state(self, account: DemoAccount, events: list[dict[str, Any]],
+                           book: PendingLimitBook) -> None:
+        """Atomically persist fills, positions, replay cursor and pending-leg states."""
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._write_account(db, account, events)
+            db.execute("DELETE FROM pending_setups")
             db.executemany(
-                "INSERT INTO demo_positions(symbol, payload) VALUES (?, ?)",
-                [(symbol, json.dumps(self._position_payload(pos), separators=(",", ":")))
-                 for symbol, pos in account.positions.items()],
-            )
-            db.execute("DELETE FROM demo_events")
-            db.executemany(
-                "INSERT INTO demo_events(payload) VALUES (?)",
-                [(json.dumps(event, separators=(",", ":"), default=str),) for event in events],
+                "INSERT INTO pending_setups(symbol, payload) VALUES (?, ?)",
+                self._pending_rows(book),
             )
 
     def save_manual_symbols(self, symbols: list[str]) -> None:
@@ -124,10 +161,8 @@ class SQLiteStore:
             return json.loads(row["value"]) if row else []
 
     def save_strategy_config(self, config: StrategyConfig) -> None:
-        # The user's Pine strategy requires a pullback after a trendline break.
         values = asdict(config)
         values["require_trendline_pullback"] = True
-        # Dynamic trailing is not implemented in the multi-target demo ledger yet.
         values["use_trailing_stop"] = False
         with self._connect() as db:
             db.execute(
@@ -143,17 +178,11 @@ class SQLiteStore:
                 return StrategyConfig()
             try:
                 values = json.loads(row["value"])
-                # Older saved settings predate the user's current Pine source
-                # (4H OB quality filters + separate 15m trendline path). Do not
-                # let stale values such as the former 0.15 ATR stop buffer
-                # silently override the new source-of-truth defaults.
                 if "ob_atr_len" not in values or "enable_trendline_signals" not in values:
                     return StrategyConfig()
                 allowed = set(StrategyConfig.__dataclass_fields__)
                 values = {key: value for key, value in values.items() if key in allowed}
-                # Keep persisted settings consistent with the supplied Pine source.
                 values["require_trendline_pullback"] = True
-                # Do not restore an enabled but non-functional trailing setting.
                 values["use_trailing_stop"] = False
                 return StrategyConfig(**values)
             except (TypeError, ValueError, json.JSONDecodeError):
@@ -187,24 +216,10 @@ class SQLiteStore:
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             db.execute("DELETE FROM pending_setups")
-            rows = []
-            for symbol, setup in book.setups.items():
-                payload = {
-                    "symbol": setup.symbol, "side": setup.side,
-                    "created_at": setup.created_at,
-                    "expires_after_bars": setup.expires_after_bars,
-                    "invalidation": setup.invalidation, "stop": setup.stop,
-                    "ob_top": setup.ob_top, "ob_bottom": setup.ob_bottom,
-                    "last_processed_bar": setup.last_processed_bar,
-                    "limits": [{
-                        "number": leg.number, "price": leg.price,
-                        "status": leg.status.value, "filled_at": leg.filled_at,
-                        "cancelled_at": leg.cancelled_at,
-                        "cancel_reason": leg.cancel_reason,
-                    } for leg in setup.limits],
-                }
-                rows.append((symbol, json.dumps(payload, separators=(",", ":"))))
-            db.executemany("INSERT INTO pending_setups(symbol, payload) VALUES (?, ?)", rows)
+            db.executemany(
+                "INSERT INTO pending_setups(symbol, payload) VALUES (?, ?)",
+                self._pending_rows(book),
+            )
 
     def load_pending_setups(self) -> PendingLimitBook:
         """Restore pending setups after a process restart."""
