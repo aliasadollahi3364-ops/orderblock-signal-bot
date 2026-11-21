@@ -152,6 +152,8 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
             "TP1_TRAILING_STOP": "🔒 حد محافظتی بعد از TP2 فعال شد؛ معامله بسته شد",
         }
         label = event_labels.get(str(event.get("type")), f"رویداد معامله: {event.get('type')}")
+        if event.get("leg") is not None:
+            label += f" | لیمیت شماره {event['leg']}"
         text = (
             f"{label} | {event['symbol']}\n"
             f"جهت: {event.get('side', 'نامشخص')}\n"
