@@ -107,11 +107,6 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
 
     def handle_signal(signal: Signal) -> None:
         if signal.method == "TRENDLINE":
-            # Never attach a fresh pending setup to an already-open demo position.
-            current_position = runtime.account.positions.get(signal.symbol)
-            if current_position is not None and not current_position.closed:
-                logger.info("Open demo position already exists for %s; trendline setup suppressed.", signal.symbol)
-                return
             # The trendline path alerts immediately, then waits for either of
             # the two simulated limit prices to be touched on a later 15m bar.
             try:
@@ -122,12 +117,15 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
                     signal.volume_weighted_price,
                 )
                 created_at = signal.timestamp + 15 * 60 * 1000
-                existing = runtime.pending_limits.setups.get(signal.symbol)
-                if existing is not None and existing.active:
-                    logger.info("Pending setup already active for %s; duplicate alert suppressed.", signal.symbol)
-                    return
-                if existing is not None and existing.created_at == created_at:
-                    logger.info("Replayed trendline signal suppressed for %s.", signal.symbol)
+                current_position = runtime.account.positions.get(signal.symbol)
+                position_open = current_position is not None and not current_position.closed
+                if not runtime.pending_limits.can_start_setup(
+                    signal.symbol, position_open=position_open, created_at=created_at
+                ):
+                    logger.info(
+                        "Trendline setup suppressed for %s: open position, active setup, or replay.",
+                        signal.symbol,
+                    )
                     return
                 setup = PendingSetup(
                     symbol=signal.symbol,
