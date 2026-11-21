@@ -156,79 +156,82 @@ class AutomaticScanner:
                 log.warning("Manual symbol unavailable on configured exchange: %s", requested)
         markets = manual_markets
 
-        # Pending limit setups are monitored independently of the current OB
-        # ranking so a still-valid setup is not abandoned if its symbol drops
-        # out of today's candidate shortlist.
+        # Replay every newly closed 15m candle for pending setups in chronological
+        # order. Looking only at the latest candle can miss a limit touch when
+        # scans are delayed or the process was temporarily offline.
         now_ms = int(time.time() * 1000)
         for symbol, setup in list(runtime.pending_limits.setups.items()):
-            if not setup.active:
+            position = runtime.account.positions.get(symbol)
+            if not setup.active and (position is None or position.closed):
                 continue
             try:
-                rows = self.market_data.fetch_ohlcv(symbol, "15m", 2)
+                lookback = max(40, setup.expires_after_bars + 3)
+                rows = self.market_data.fetch_ohlcv(symbol, "15m", lookback)
                 bars = _to_candles(rows)
-                bar = next((item for item in reversed(bars)
-                            if item.timestamp + MS_15M <= now_ms), None)
-                if bar is None:
-                    continue
-                pending_events = runtime.pending_limits.process_candle(
-                    symbol, bar.timestamp + MS_15M, bar.high, bar.low, bar.close
-                )
-                if not pending_events:
-                    continue
-                runtime.persist_pending_limits()
-                filled_any = False
-                for pending_event in pending_events:
-                    event_time = datetime.fromtimestamp(
-                        (bar.timestamp + MS_15M) / 1000, timezone.utc
-                    ).isoformat()
-                    if pending_event.status == "FILLED":
-                        side = Side.LONG if pending_event.side == "BUY" else Side.SHORT
-                        try:
-                            position = runtime.account.add_limit_fill(
-                                symbol, side, pending_event.price, setup.stop,
-                                opened_at=event_time,
-                                leg_number=pending_event.leg_number,
-                            )
-                            filled_any = True
-                            runtime.closed_trade_events.append({
-                                "symbol": symbol, "side": side.value, "type": "LIMIT_FILLED",
-                                "leg": pending_event.leg_number, "price": pending_event.price,
-                                "time": event_time, "realized_pnl": position.realized_pnl,
-                            })
-                            runtime.persist_demo_state()
-                            record = {
-                                "symbol": symbol, "side": pending_event.side,
-                                "type": "LIMIT_FILLED", "leg": pending_event.leg_number,
-                                "price": pending_event.price, "time": event_time,
-                                "realized_pnl": position.realized_pnl,
-                            }
-                        except ValueError as exc:
-                            # Never report a simulated fill that the demo ledger
-                            # could not accept; convert this leg to an explicit cancel.
-                            leg = next(x for x in setup.limits if x.number == pending_event.leg_number)
-                            leg.status = PendingStatus.CANCELLED
-                            leg.cancelled_at = bar.timestamp
-                            leg.cancel_reason = f"ثبت دمو ناموفق: {exc}"
-                            runtime.persist_pending_limits()
+                for bar in bars:
+                    close_time = bar.timestamp + MS_15M
+                    if close_time > now_ms:
+                        continue
+                    if setup.last_processed_bar is not None and close_time <= setup.last_processed_bar:
+                        continue
+                    if close_time <= setup.created_at:
+                        continue
+
+                    pending_events = runtime.pending_limits.process_candle(
+                        symbol, close_time, bar.high, bar.low, bar.close
+                    )
+                    if pending_events:
+                        runtime.persist_pending_limits()
+                    for pending_event in pending_events:
+                        event_time = datetime.fromtimestamp(
+                            close_time / 1000, timezone.utc
+                        ).isoformat()
+                        if pending_event.status == "FILLED":
+                            side = Side.LONG if pending_event.side == "BUY" else Side.SHORT
+                            try:
+                                position = runtime.account.add_limit_fill(
+                                    symbol, side, pending_event.price, setup.stop,
+                                    opened_at=event_time,
+                                    leg_number=pending_event.leg_number,
+                                )
+                                runtime.closed_trade_events.append({
+                                    "symbol": symbol, "side": side.value, "type": "LIMIT_FILLED",
+                                    "leg": pending_event.leg_number, "price": pending_event.price,
+                                    "time": event_time, "realized_pnl": position.realized_pnl,
+                                })
+                                runtime.persist_demo_state()
+                                record = {
+                                    "symbol": symbol, "side": pending_event.side,
+                                    "type": "LIMIT_FILLED", "leg": pending_event.leg_number,
+                                    "price": pending_event.price, "time": event_time,
+                                    "realized_pnl": position.realized_pnl,
+                                }
+                            except ValueError as exc:
+                                # Do not announce a fill the demo ledger rejected.
+                                leg = next(x for x in setup.limits if x.number == pending_event.leg_number)
+                                leg.status = PendingStatus.CANCELLED
+                                leg.cancelled_at = close_time
+                                leg.cancel_reason = f"ثبت دمو ناموفق: {exc}"
+                                runtime.persist_pending_limits()
+                                record = {
+                                    "symbol": symbol, "side": pending_event.side,
+                                    "type": "LIMIT_CANCELLED", "leg": pending_event.leg_number,
+                                    "price": pending_event.price, "time": event_time,
+                                    "reason": leg.cancel_reason,
+                                }
+                        else:
                             record = {
                                 "symbol": symbol, "side": pending_event.side,
                                 "type": "LIMIT_CANCELLED", "leg": pending_event.leg_number,
                                 "price": pending_event.price, "time": event_time,
-                                "reason": leg.cancel_reason,
+                                "reason": pending_event.reason,
                             }
-                    else:
-                        record = {
-                            "symbol": symbol, "side": pending_event.side,
-                            "type": "LIMIT_CANCELLED", "leg": pending_event.leg_number,
-                            "price": pending_event.price, "time": event_time,
-                            "reason": pending_event.reason,
-                        }
-                    if self.on_pending_event:
-                        self.on_pending_event(record)
+                        if self.on_pending_event:
+                            self.on_pending_event(record)
 
-                if filled_any:
-                    # Evaluate the fill candle once; stop has priority over
-                    # targets when OHLC cannot establish the intrabar sequence.
+                    # A filled leg becomes a demo position at this candle's
+                    # limit price. Manage it on this and each subsequent closed
+                    # candle, with the demo ledger's conservative stop priority.
                     position = runtime.account.positions.get(symbol)
                     if position is not None and not position.closed:
                         trade_events = runtime.account.process_candle(
@@ -237,19 +240,20 @@ class AutomaticScanner:
                         for event in trade_events:
                             record = {
                                 "symbol": symbol, "side": position.side.value,
-                                "time": datetime.fromtimestamp(
-                                    (bar.timestamp + MS_15M) / 1000, timezone.utc
-                                ).isoformat(),
-                                **event, "realized_pnl": position.realized_pnl,
+                                "time": event_time, **event,
+                                "realized_pnl": position.realized_pnl,
                             }
                             runtime.closed_trade_events.append(record)
                             if self.on_trade_event:
                                 self.on_trade_event(record)
-                        runtime.persist_demo_state()
+                        if trade_events:
+                            runtime.persist_demo_state()
                         if position.closed:
-                            self._cancel_pending_after_position_close(
-                                symbol, bar.timestamp + MS_15M
-                            )
+                            self._cancel_pending_after_position_close(symbol, close_time)
+
+                    # Persist the candle cursor even when no pending event fired,
+                    # so a restart cannot replay an already-managed OHLC range.
+                    runtime.persist_pending_limits()
                     self._last_demo_bar[symbol] = bar.timestamp
             except Exception:
                 errors += 1
