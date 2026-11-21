@@ -245,6 +245,10 @@ class GoldMarketService:
         self.warmed_up = False
         self._bootstrap()
 
+    def update_strategy_config(self, strategy_config: StrategyConfig) -> None:
+        """Keep gold analysis aligned with live Telegram strategy settings without resetting candle state."""
+        self.strategy.cfg = replace(strategy_config, min_tick=1.0)
+
     def _bootstrap(self) -> None:
         try:
             self.store.add_history(self.client.intraday_history())
