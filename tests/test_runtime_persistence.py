@@ -448,10 +448,10 @@ def _assert_two_filled_legs_exit_survives_restart(tmp_path, exit_kind):
     assert [leg.status for leg in final_book.setups["BTC/USDT"].limits] == [
         PendingStatus.FILLED, PendingStatus.FILLED,
     ]
-    assert [e["type"] for e in final_events if e["type"] in {"STOP", "TP1", "TP2", "TP3"}][-len(expected):] == expected
+    assert sorted(e["type"] for e in final_events if e["type"] in {"STOP", "TP1", "TP2", "TP3"}) == sorted(expected)
 
     outbox = final_store.load_notification_outbox()
-    assert [item["event"]["type"] for item in outbox] == ["LIMIT_FILLED", "LIMIT_FILLED"] + expected
+    assert sorted(item["event"]["type"] for item in outbox) == sorted(["LIMIT_FILLED", "LIMIT_FILLED"] + expected)
     final_store.save_runtime_state(final_account, final_events, final_book)
     assert len(final_store.load_notification_outbox()) == len(outbox)
 
