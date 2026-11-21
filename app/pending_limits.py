@@ -126,6 +126,10 @@ class PendingLimitBook:
         if setup.last_processed_bar is not None and timestamp <= setup.last_processed_bar:
             return []
         setup.last_processed_bar = timestamp
+        # created_at and processed timestamps are candle close-times. The
+        # confirmation candle itself must never fill its own pullback orders.
+        if timestamp <= setup.created_at:
+            return []
         events: list[PendingEvent] = []
 
         # A wick through the structural stop invalidates the setup too. If a
