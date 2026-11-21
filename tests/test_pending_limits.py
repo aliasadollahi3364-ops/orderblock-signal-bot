@@ -141,3 +141,24 @@ def test_pending_setup_persists_leg_states_and_replay_cursor_across_restart(tmp_
     final_state = store.load_pending_setups().setups["BTC/USDT"]
     assert final_state.last_processed_bar == 1_800_000
     assert all(leg.status is PendingStatus.FILLED for leg in final_state.limits)
+
+
+def test_open_demo_position_blocks_any_new_setup_for_same_symbol():
+    book = PendingLimitBook()
+    assert book.can_start_setup("BTC/USDT", position_open=False, created_at=1_000_000)
+
+    # Even if the previous setup has finished, an open position blocks re-entry.
+    candidate = setup()
+    book.add(candidate)
+    book.cancel("BTC/USDT", 900_000, "previous setup finished")
+    assert not book.can_start_setup("BTC/USDT", position_open=True, created_at=2_000_000)
+
+
+def test_setup_guard_allows_new_timestamp_only_after_position_is_closed():
+    book = PendingLimitBook()
+    candidate = setup()
+    book.add(candidate)
+    book.cancel("BTC/USDT", 900_000, "previous setup finished")
+
+    assert not book.can_start_setup("BTC/USDT", position_open=False, created_at=candidate.created_at)
+    assert book.can_start_setup("BTC/USDT", position_open=False, created_at=2_000_000)
