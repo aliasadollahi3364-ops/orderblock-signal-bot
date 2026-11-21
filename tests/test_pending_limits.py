@@ -336,3 +336,27 @@ def test_atomic_runtime_snapshot_restores_open_position_and_remaining_limit_afte
     assert final_position.margin_allocated == pytest.approx(10.0)
     assert final_book.setups["BTC/USDT"].limits[1].status is PendingStatus.FILLED
     assert final_book.setups["BTC/USDT"].last_processed_bar == 1_800_000
+
+
+def test_pending_setup_rejects_reversed_buy_limit_order():
+    with pytest.raises(ValueError, match="BUY limit 1"):
+        PendingSetup("BTC/USDT", "BUY", 0, 8, 99.0, 98.0, 110.0, 100.0,
+                     [PendingLimit(1, 101.0), PendingLimit(2, 104.0)])
+
+
+def test_pending_setup_rejects_reversed_sell_limit_order():
+    with pytest.raises(ValueError, match="SELL limit 1"):
+        PendingSetup("ETH/USDT", "SELL", 0, 8, 111.0, 112.0, 110.0, 100.0,
+                     [PendingLimit(1, 109.0), PendingLimit(2, 106.0)])
+
+
+def test_pending_setup_rejects_limit_outside_order_block():
+    with pytest.raises(ValueError, match="inside the order block"):
+        PendingSetup("BTC/USDT", "BUY", 0, 8, 99.0, 98.0, 110.0, 100.0,
+                     [PendingLimit(1, 111.0), PendingLimit(2, 104.0)])
+
+
+def test_pending_setup_rejects_non_finite_prices():
+    with pytest.raises(ValueError, match="finite"):
+        PendingSetup("BTC/USDT", "BUY", 0, 8, 99.0, 98.0, 110.0, 100.0,
+                     [PendingLimit(1, float("nan")), PendingLimit(2, 104.0)])
