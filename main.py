@@ -69,6 +69,29 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
         except Exception:
             logger.exception("Could not create/send signal chart for %s", signal.symbol)
             send(f"📣 سیگنال دمو {signal.symbol} | {signal.side}\nروش ورود: {signal.method}\nورود: {signal.entry:g}\nحد ضرر: {signal.stop:g}\nفقط دمو؛ معاملات واقعی خاموش")
+    async def send_pending_signal_photo(signal: Signal, near: float, deep: float,
+                                         near_targets: tuple[float, float, float],
+                                         deep_targets: tuple[float, float, float]) -> None:
+        if bot is None:
+            return
+        try:
+            rows = await asyncio.to_thread(market_data.fetch_ohlcv, signal.symbol, "15m", 80)
+            chart = make_signal_chart(
+                rows, signal.symbol, signal.side, near, signal.stop,
+                near_targets[0], near_targets[1], near_targets[2],
+                entry2=deep, tp1_2=deep_targets[0],
+                tp2_2=deep_targets[1], tp3_2=deep_targets[2],
+            )
+            caption = (
+                f"📊 شکست خط روند + اردربلاک | {signal.symbol}\n"
+                f"لیمیت ۱: {near:g} | لیمیت ۲: {deep:g}\n"
+                f"حد ضرر: {signal.stop:g}\n"
+                "اهداف هر لیمیت جداگانه روی نمودار مشخص شده‌اند. فقط حساب دمو."
+            )
+            await bot.send_photo(chat_id=settings.telegram_chat_id, photo=chart, caption=caption)
+        except Exception:
+            logger.exception("Could not create/send two-limit chart for %s", signal.symbol)
+
     def handle_signal(signal: Signal) -> None:
         if signal.method == "TRENDLINE":
             # The trendline path alerts immediately, then waits for either of
@@ -120,6 +143,12 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
                     "حساب دمو | معاملات واقعی: خاموش"
                 )
                 send(alert)
+                if bot is not None:
+                    asyncio.run_coroutine_threadsafe(
+                        send_pending_signal_photo(signal, near, deep,
+                                                  (t1, t2, t3), (u1, u2, u3)),
+                        loop,
+                    )
             except (ValueError, TypeError) as exc:
                 logger.warning("Trendline pending setup rejected for %s: %s", signal.symbol, exc)
                 send(f"⚠️ سیگنال خط روند {signal.symbol} ایجاد نشد: {exc}")
