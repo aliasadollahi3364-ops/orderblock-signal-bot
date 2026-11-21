@@ -176,7 +176,6 @@ def test_scanner_cancels_unfilled_second_limit_after_shared_tp1(monkeypatch):
         rows = [
             [10 * MS_15M, 103, 105, 103, 104, 10],
             [11 * MS_15M, 106, 111, 105, 110, 12],
-            [12 * MS_15M, 103, 107, 100, 103, 14],
         ]
 
         def fetch_ohlcv(self, symbol, timeframe, limit):
@@ -198,7 +197,8 @@ def test_scanner_cancels_unfilled_second_limit_after_shared_tp1(monkeypatch):
     monkeypatch.setattr(runtime, "manual_symbols", [])
     monkeypatch.setattr(runtime, "selected_symbols", [])
     monkeypatch.setattr(runtime, "closed_trade_events", [])
-    monkeypatch.setattr("app.scanner.time.time", lambda: 13 * MS_15M / 1000)
+    clock = [12 * MS_15M]
+    monkeypatch.setattr("app.scanner.time.time", lambda: clock[0] / 1000)
 
     pending_events = []
     trade_events = []
@@ -219,6 +219,8 @@ def test_scanner_cancels_unfilled_second_limit_after_shared_tp1(monkeypatch):
     assert setup.limits[1].status.value == "CANCELLED"
 
     # A later deep pullback cannot resurrect the cancelled second leg.
+    scanner.market_data.rows.append([12 * MS_15M, 103, 107, 100, 103, 14])
+    clock[0] = 13 * MS_15M
     scanner.scan_once()
     assert [event["type"] for event in pending_events].count("LIMIT_FILLED") == 1
     assert setup.limits[1].status.value == "CANCELLED"
