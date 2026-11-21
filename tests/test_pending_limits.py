@@ -45,10 +45,10 @@ def test_two_limit_prices_reject_order_block_without_room_for_pullback():
 
 def test_limit_setup_requires_stop_behind_both_entries():
     with pytest.raises(ValueError, match="BUY stop"):
-        PendingSetup("BTC/USDT", "BUY", 0, 8, 98.0, 101.0, 110.0, 100.0,
+        PendingSetup("BTC/USDT", "BUY", 0, 8, 98.0, 103.0, 110.0, 100.0,
                      [PendingLimit(1, 105.0), PendingLimit(2, 102.0)])
     with pytest.raises(ValueError, match="SELL stop"):
-        PendingSetup("ETH/USDT", "SELL", 0, 8, 112.0, 109.0, 110.0, 100.0,
+        PendingSetup("ETH/USDT", "SELL", 0, 8, 112.0, 107.0, 110.0, 100.0,
                      [PendingLimit(1, 105.0), PendingLimit(2, 108.0)])
 
 
