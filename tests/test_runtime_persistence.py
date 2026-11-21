@@ -16,6 +16,7 @@ def test_limit_fill_and_demo_position_are_committed_as_one_restart_snapshot(tmp_
     )
     book.add(setup)
     app_runtime = BotRuntime(account=account, storage=store, pending_limits=book)
+    store.save_pending_setups(book)  # Signal creation is durably stored before any candle can fill it.
 
     events = book.process_candle("BTC/USDT", 1_800_000, 105, 103, 104)
     assert [(event.leg_number, event.status) for event in events] == [(1, "FILLED")]
@@ -58,6 +59,7 @@ def test_two_fills_on_same_candle_are_not_half_committed(tmp_path):
     )
     book.add(setup)
     app_runtime = BotRuntime(account=account, storage=store, pending_limits=book)
+    store.save_pending_setups(book)
 
     events = book.process_candle("ETH/USDT", 1_800_000, 105, 100, 103)
     assert [event.leg_number for event in events] == [1, 2]
