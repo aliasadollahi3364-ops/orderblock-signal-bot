@@ -116,6 +116,25 @@ class PendingLimitBook:
             raise ValueError(f"active pending setup already exists for {setup.symbol}")
         self.setups[setup.symbol] = setup
 
+    def can_start_setup(self, symbol: str, *, position_open: bool = False,
+                        created_at: int | None = None) -> bool:
+        """Return whether a fresh setup may be created without duplicating exposure.
+
+        An open demo position or an active pending setup blocks another entry.
+        The same signal timestamp is also blocked after a setup completes, which
+        prevents replayed candles from recreating an already-consumed setup.
+        """
+        if position_open:
+            return False
+        existing = self.setups.get(symbol)
+        if existing is None:
+            return True
+        if existing.active:
+            return False
+        if created_at is not None and existing.created_at == created_at:
+            return False
+        return True
+
     def process_candle(self, symbol: str, timestamp: int, high: float,
                        low: float, close: float) -> list[PendingEvent]:
         setup = self.setups.get(symbol)
