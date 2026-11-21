@@ -197,54 +197,76 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
             if bot is not None:
                 asyncio.run_coroutine_threadsafe(send_signal_photo(signal, position), loop)
     def handle_trade_event(event: dict) -> None:
-        """Keep TP/SL milestone notifications permanently in Telegram."""
-        if bot is None:
-            return
-        event_labels = {
-            "TP1": "🎯 هدف اول (TP1) زده شد",
-            "TP2": "🎯 هدف دوم (TP2) زده شد",
-            "TP3": "🏁 هدف سوم (TP3) زده شد؛ معامله کامل بسته شد",
-            "STOP": "🛑 حد ضرر (SL) فعال شد؛ معامله بسته شد",
-            "BREAK_EVEN_STOP": "⚖️ حد سربه‌سر فعال شد؛ معامله بسته شد",
-            "TP1_TRAILING_STOP": "🔒 حد محافظتی بعد از TP2 فعال شد؛ معامله بسته شد",
-        }
-        label = event_labels.get(str(event.get("type")), f"رویداد معامله: {event.get('type')}")
-        if event.get("leg") is not None:
-            label += f" | لیمیت شماره {event['leg']}"
-        text = (
-            f"{label} | {event['symbol']}\n"
-            f"جهت: {event.get('side', 'نامشخص')}\n"
-            f"قیمت رویداد: {event['price']:g}\n"
-            f"زمان: {event['time']}\n"
-            f"سود/زیان تحقق‌یافته تا این لحظه: {event['realized_pnl']:+.4f} USDT\n"
-            "حساب دمو | معاملات واقعی: خاموش"
-        )
-        future = asyncio.run_coroutine_threadsafe(
-            bot.send_message(chat_id=settings.telegram_chat_id, text=text), loop
-        )
-        future.add_done_callback(
-            lambda result: logger.error("Could not send persistent trade event: %s", result.exception())
-            if result.exception() else None
-        )
+        # Delivery is handled by the durable SQLite outbox after the state commit.
+        logger.debug("Trade event queued for durable Telegram delivery: %s", event.get("type"))
 
     def handle_pending_event(event: dict) -> None:
-        if event.get("type") == "LIMIT_FILLED":
-            message = (
-                f"✅ لیمیت شماره {event['leg']} پر شد | {event['symbol']}\n"
-                f"جهت: {event['side']}\nقیمت پرشدن این لیمیت: {event['price']:g}\n"
-                f"میانگین ورود پوزیشن واحد: {event['average_entry']:g}\n"
-                f"مارجین استفاده‌شده: {event['margin_allocated']:g} دلار\n"
-                f"اهداف مشترک: TP1 {event['tp1']:g} | TP2 {event['tp2']:g} | TP3 {event['tp3']:g}\n"
-                f"زمان: {event['time']}\nحساب دمو؛ معاملات واقعی خاموش"
-            )
-        else:
-            message = (
-                f"❌ لیمیت شماره {event['leg']} لغو شد | {event['symbol']}\n"
-                f"جهت: {event['side']}\nقیمت سفارش: {event['price']:g}\n"
-                f"زمان: {event['time']}\nعلت لغو: {event.get('reason', 'نامشخص')}\n"
-                "حساب دمو؛ معاملات واقعی خاموش"
-            )
-        send(message)
+        # Delivery is handled by the durable SQLite outbox after the state commit.
+        logger.debug("Pending event queued for durable Telegram delivery: %s", event.get("type"))
+
+    async def dispatch_notifications() -> None:
+        if bot is None:
+            return
+        while True:
+            try:
+                queued = await asyncio.to_thread(store.load_notification_outbox, 50)
+                for item in queued:
+                    event = item["event"]
+                    kind = item["kind"]
+                    event_type = str(event.get("type", ""))
+                    if kind == "pending" or event_type == "LIMIT_CANCELLED":
+                        message = (
+                            f"❌ لیمیت شماره {event['leg']} لغو شد | {event['symbol']}\\n"
+                            f"جهت: {event.get('side', 'نامشخص')}\\n"
+                            f"قیمت سفارش: {float(event['price']):g}\\n"
+                            f"زمان: {event.get('time', 'نامشخص')}\\n"
+                            f"علت لغو: {event.get('reason', 'نامشخص')}\\n"
+                            "حساب دمو؛ معاملات واقعی خاموش"
+                        )
+                    elif event_type == "LIMIT_FILLED":
+                        message = (
+                            f"✅ لیمیت شماره {event['leg']} پر شد | {event['symbol']}\\n"
+                            f"جهت: {event['side']}\\n"
+                            f"قیمت پرشدن این لیمیت: {float(event['price']):g}\\n"
+                            f"میانگین ورود پوزیشن واحد: {float(event['average_entry']):g}\\n"
+                            f"مارجین استفاده‌شده: {float(event['margin_allocated']):g} دلار\\n"
+                            f"اهداف مشترک: TP1 {float(event['tp1']):g} | TP2 {float(event['tp2']):g} | TP3 {float(event['tp3']):g}\\n"
+                            f"زمان: {event.get('time', 'نامشخص')}\\nحساب دمو؛ معاملات واقعی خاموش"
+                        )
+                    else:
+                        labels = {
+                            "TP1": "🎯 هدف اول (TP1) زده شد",
+                            "TP2": "🎯 هدف دوم (TP2) زده شد",
+                            "TP3": "🏁 هدف سوم (TP3) زده شد؛ معامله کامل بسته شد",
+                            "STOP": "🛑 حد ضرر (SL) فعال شد؛ معامله بسته شد",
+                            "BREAK_EVEN_STOP": "⚖️ حد سربه‌سر فعال شد؛ معامله بسته شد",
+                            "TP1_TRAILING_STOP": "🔒 حد محافظتی بعد از TP2 فعال شد؛ معامله بسته شد",
+                        }
+                        label = labels.get(event_type, f"رویداد معامله: {event_type}")
+                        message = (
+                            f"{label} | {event['symbol']}\\n"
+                            f"جهت: {event.get('side', 'نامشخص')}\\n"
+                            f"قیمت رویداد: {float(event['price']):g}\\n"
+                            f"زمان: {event.get('time', 'نامشخص')}\\n"
+                            f"سود/زیان تحقق‌یافته تا این لحظه: {float(event.get('realized_pnl', 0.0)):+.4f} USDT\\n"
+                            "حساب دمو | معاملات واقعی: خاموش"
+                        )
+                    try:
+                        await bot.send_message(chat_id=settings.telegram_chat_id, text=message)
+                    except Exception:
+                        logger.exception("Telegram outbox delivery failed for %s", item["event_id"])
+                        break
+                    # Mark only after Telegram confirms success. A crash in the
+                    # tiny send/mark window can cause a retry; Telegram offers
+                    # no idempotency key for sendMessage, so delivery is at-least-once.
+                    await asyncio.to_thread(
+                        store.mark_notification_delivered,
+                        item["event_id"],
+                        datetime.now(timezone.utc).isoformat(),
+                    )
+            except Exception:
+                logger.exception("Notification outbox dispatcher failed")
+            await asyncio.sleep(2)
 
     scanner = AutomaticScanner(market_data=market_data, strategy_config=runtime.strategy_config,
         universe_limit=settings.scanner_universe_limit, candidate_limit=settings.scanner_candidate_limit,
@@ -252,7 +274,10 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
         on_pending_event=handle_pending_event,
         )
     try:
-        await asyncio.to_thread(scanner.run_forever, settings.scan_interval_seconds)
+        await asyncio.gather(
+            asyncio.to_thread(scanner.run_forever, settings.scan_interval_seconds),
+            dispatch_notifications(),
+        )
     finally:
         market_data.close()
         if bot is not None: await bot.shutdown()
