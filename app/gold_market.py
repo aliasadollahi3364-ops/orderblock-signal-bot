@@ -391,7 +391,7 @@ class GoldMarketService:
         warm = "آماده (SMA200 چهار‌ساعته موجود است)" if self.warmed_up else "در حال جمع‌آوری تاریخچه؛ سیگنال تا تکمیل داده کافی صادر نمی‌شود"
         updated = self.last_updated_at or "نامشخص"
         error = f"\nخطای آخر: {self.last_error}" if self.last_error else ""
-        return (
+        status = (
             "🥇 وضعیت طلای ۱۸ عیار ایران\n"
             f"قیمت هر گرم: {gold_price} تومان\n"
             f"آخرین به‌روزرسانی: {updated}\n"
@@ -401,6 +401,7 @@ class GoldMarketService:
             "قیمت‌ها از طلاسنج · https://talasanj.info"
             f"{error}"
         )
+        return self.investment_report() + "\n\n" + status
 
 
 def format_gold_signal(signal: Signal) -> str:
