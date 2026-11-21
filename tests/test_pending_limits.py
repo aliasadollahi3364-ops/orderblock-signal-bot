@@ -2,6 +2,8 @@ from app.pending_limits import (
     PendingLimit, PendingLimitBook, PendingSetup, PendingStatus,
     make_two_limit_prices,
 )
+from app.storage import SQLiteStore
+import pytest
 
 
 def setup(side="BUY"):
@@ -59,7 +61,6 @@ def test_short_invalidation_cancels_both_legs():
     assert [(e.leg_number, e.status) for e in events] == [(1, "CANCELLED"), (2, "CANCELLED")]
 
 
-
 def test_confirmation_candle_cannot_fill_newly_created_limits():
     book = PendingLimitBook()
     candidate = PendingSetup(
@@ -84,13 +85,13 @@ def test_structural_wick_invalidation_precedes_any_limit_touch():
         (1, "CANCELLED"), (2, "CANCELLED")
     ]
 
+
 def test_manual_cancel_only_cancels_still_pending_leg():
     book = PendingLimitBook()
     book.add(setup())
     book.process_candle("BTC/USDT", 900_000, 105, 103, 104)
     events = book.cancel("BTC/USDT", 1_000_000, "لغو دستی")
     assert [(e.leg_number, e.status) for e in events] == [(2, "CANCELLED")]
-
 
 
 def test_completed_setup_keeps_advancing_its_candle_cursor():
@@ -103,3 +104,40 @@ def test_completed_setup_keeps_advancing_its_candle_cursor():
     assert candidate.last_processed_bar == 1_800_000
     assert book.process_candle("BTC/USDT", 2_700_000, 105, 103, 104) == []
     assert candidate.last_processed_bar == 2_700_000
+
+
+def test_active_setup_duplicate_is_rejected_but_finished_setup_can_be_replaced():
+    book = PendingLimitBook()
+    book.add(setup())
+    with pytest.raises(ValueError, match="active pending setup"):
+        book.add(setup())
+    book.cancel("BTC/USDT", 900_000, "test complete")
+    replacement = setup()
+    replacement.created_at = 1_000_000
+    book.add(replacement)
+    assert book.setups["BTC/USDT"] is replacement
+
+
+def test_pending_setup_persists_leg_states_and_replay_cursor_across_restart(tmp_path):
+    store = SQLiteStore(str(tmp_path / "pending-restart.sqlite3"))
+    original = PendingLimitBook()
+    candidate = setup()
+    original.add(candidate)
+    original.process_candle("BTC/USDT", 900_000, 105, 103, 104)
+    store.save_pending_setups(original)
+
+    restored = store.load_pending_setups()
+    resumed = restored.setups["BTC/USDT"]
+    assert resumed.last_processed_bar == 900_000
+    assert resumed.limits[0].status is PendingStatus.FILLED
+    assert resumed.limits[0].filled_at == 900_000
+    assert resumed.limits[1].status is PendingStatus.PENDING
+
+    # Replaying the already processed candle after restart must not duplicate a fill.
+    assert restored.process_candle("BTC/USDT", 900_000, 105, 103, 104) == []
+    events = restored.process_candle("BTC/USDT", 1_800_000, 102, 100, 101)
+    assert [(event.leg_number, event.status) for event in events] == [(2, "FILLED")]
+    store.save_pending_setups(restored)
+    final_state = store.load_pending_setups().setups["BTC/USDT"]
+    assert final_state.last_processed_bar == 1_800_000
+    assert all(leg.status is PendingStatus.FILLED for leg in final_state.limits)
