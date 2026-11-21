@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 from app.demo import Side
 from app.market_data import MarketCandidate
+from app.pending_limits import PendingStatus
 from app.runtime import runtime
 from app.strategy import Candle, OrderBlockStrategy, Signal, StrategyConfig
 
@@ -187,7 +188,7 @@ class AutomaticScanner:
                             # Never report a simulated fill that the demo ledger
                             # could not accept; convert this leg to an explicit cancel.
                             leg = next(x for x in setup.limits if x.number == pending_event.leg_number)
-                            leg.status = __import__("app.pending_limits", fromlist=["PendingStatus"]).PendingStatus.CANCELLED
+                            leg.status = PendingStatus.CANCELLED
                             leg.cancelled_at = bar.timestamp
                             leg.cancel_reason = f"ثبت دمو ناموفق: {exc}"
                             runtime.persist_pending_limits()
