@@ -164,3 +164,61 @@ def test_scanner_reports_each_pending_leg_cancelled_on_structural_invalidation(m
     ]
     assert all("بی‌اعتبار" in event["reason"] for event in events)
     assert account.open_positions == []
+
+
+def test_scanner_cancels_unfilled_second_limit_after_shared_tp1(monkeypatch):
+    from app.demo import DemoAccount
+    from app.pending_limits import PendingLimit, PendingLimitBook, PendingSetup
+    from app.runtime import runtime
+    from app.scanner import AutomaticScanner, MS_15M
+
+    class ProfitThenDeepPullbackMarketData:
+        rows = [
+            [10 * MS_15M, 103, 105, 103, 104, 10],
+            [11 * MS_15M, 106, 111, 105, 110, 12],
+            [12 * MS_15M, 103, 107, 100, 103, 14],
+        ]
+
+        def fetch_ohlcv(self, symbol, timeframe, limit):
+            assert timeframe == "15m"
+            return self.rows
+
+    account = DemoAccount(fee_rate=0)
+    book = PendingLimitBook()
+    setup = PendingSetup(
+        symbol="BTC/USDT", side="BUY", created_at=10 * MS_15M,
+        expires_after_bars=8, invalidation=98, stop=98,
+        ob_top=106, ob_bottom=100,
+        limits=[PendingLimit(1, 104), PendingLimit(2, 101)],
+    )
+    book.add(setup)
+    monkeypatch.setattr(runtime, "account", account)
+    monkeypatch.setattr(runtime, "pending_limits", book)
+    monkeypatch.setattr(runtime, "storage", None)
+    monkeypatch.setattr(runtime, "manual_symbols", [])
+    monkeypatch.setattr(runtime, "selected_symbols", [])
+    monkeypatch.setattr(runtime, "closed_trade_events", [])
+    monkeypatch.setattr("app.scanner.time.time", lambda: 13 * MS_15M / 1000)
+
+    pending_events = []
+    trade_events = []
+    scanner = AutomaticScanner(
+        ProfitThenDeepPullbackMarketData(),
+        on_pending_event=pending_events.append,
+        on_trade_event=trade_events.append,
+    )
+    scanner.scan_once()
+
+    assert [(event["type"], event["leg"]) for event in pending_events] == [
+        ("LIMIT_FILLED", 1), ("LIMIT_CANCELLED", 2)
+    ]
+    assert "هدف سود" in pending_events[1]["reason"]
+    assert [event["type"] for event in trade_events] == ["TP1"]
+    assert account.positions["BTC/USDT"].tp1_done is True
+    assert account.positions["BTC/USDT"].closed is False
+    assert setup.limits[1].status.value == "CANCELLED"
+
+    # A later deep pullback cannot resurrect the cancelled second leg.
+    scanner.scan_once()
+    assert [event["type"] for event in pending_events].count("LIMIT_FILLED") == 1
+    assert setup.limits[1].status.value == "CANCELLED"
