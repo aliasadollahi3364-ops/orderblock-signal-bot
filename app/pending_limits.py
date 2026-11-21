@@ -47,14 +47,27 @@ class PendingSetup:
         if self.expires_after_bars < 1:
             raise ValueError("expires_after_bars must be positive")
         prices = [leg.price for leg in self.limits]
+        numeric_values = [self.invalidation, self.stop, self.ob_top, self.ob_bottom, *prices]
+        if not all(math.isfinite(value) for value in numeric_values):
+            raise ValueError("setup prices must be finite")
+        if self.ob_bottom <= 0 or self.ob_top <= self.ob_bottom:
+            raise ValueError("invalid order-block range")
+        if sorted(leg.number for leg in self.limits) != [1, 2]:
+            raise ValueError("limit legs must be numbered exactly 1 and 2")
         if any(price <= 0 for price in prices) or prices[0] == prices[1]:
             raise ValueError("two distinct positive limit prices are required")
+        if any(not self.ob_bottom <= price <= self.ob_top for price in prices):
+            raise ValueError("both limit prices must remain inside the order block")
         if self.side == "BUY":
+            if not prices[1] < prices[0]:
+                raise ValueError("BUY limit 1 must be nearer/higher than limit 2")
             if not (self.stop < min(prices) < max(prices)):
                 raise ValueError("BUY stop must be below both limit prices")
             if self.invalidation >= min(prices):
                 raise ValueError("BUY invalidation must be below both limit prices")
         else:
+            if not prices[0] < prices[1]:
+                raise ValueError("SELL limit 1 must be nearer/lower than limit 2")
             if not (self.stop > max(prices) > min(prices)):
                 raise ValueError("SELL stop must be above both limit prices")
             if self.invalidation <= max(prices):
