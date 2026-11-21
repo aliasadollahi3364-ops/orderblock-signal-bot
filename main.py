@@ -62,7 +62,7 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
                 f"جهت: {signal.side}\n"
                 f"واگرایی RSI: {signal.rsi_divergence}"
                 + (f" | RSI: {signal.rsi_value:.1f}" if signal.rsi_value is not None else "")
-                + "\\n"
+                + "\n"
                 f"ورود: {signal.entry:g}\nحد ضرر: {signal.stop:g}\n"
                 f"TP1: {position.tp1:g}\nTP2: {position.tp2:g}\nTP3: {position.tp3:g}\n"
                 f"زمان ورود: {entry_time}\n"
