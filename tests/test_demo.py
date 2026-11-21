@@ -184,3 +184,43 @@ def test_unrealized_pnl_uses_single_weighted_average_after_partial_target():
     position = account.positions["BTC/USDT"]
     expected = (101.0 - position.entry) * position.quantity_remaining
     assert account.unrealized_pnl(101.0, "BTC/USDT") == pytest.approx(expected)
+
+
+
+def test_two_short_limit_fills_share_weighted_entry_targets_and_break_even_stop():
+    account = DemoAccount(fee_rate=0)
+    first = account.add_limit_fill("ETH/USDT", Side.SHORT, 100.0, 105.0, leg_number=1)
+    second = account.add_limit_fill("ETH/USDT", Side.SHORT, 102.0, 105.0, leg_number=2)
+
+    expected_entry = (100.0 * (25.0 / 100.0) + 102.0 * (25.0 / 102.0)) / (
+        25.0 / 100.0 + 25.0 / 102.0
+    )
+    risk = 105.0 - expected_entry
+    assert second is first
+    assert second.entry == pytest.approx(101.0)
+    assert second.tp1 == pytest.approx(expected_entry - risk)
+    assert second.tp2 == pytest.approx(expected_entry - 2 * risk)
+    assert second.tp3 == pytest.approx(expected_entry - 3 * risk)
+    assert account.margin_used == pytest.approx(10.0)
+
+    events = account.process_candle(high=100.0, low=second.tp1, symbol="ETH/USDT")
+    assert [event["type"] for event in events] == ["TP1"]
+    assert second.stop == pytest.approx(expected_entry)
+    assert second.closed is False
+
+    events = account.process_candle(high=expected_entry, low=99.0, symbol="ETH/USDT")
+    assert [event["type"] for event in events] == ["BREAK_EVEN_STOP"]
+    assert second.closed is True
+    assert second.quantity_remaining == pytest.approx(0.0)
+
+
+def test_two_limit_short_position_stop_wins_if_same_candle_touches_stop_and_target():
+    account = DemoAccount(fee_rate=0)
+    account.add_limit_fill("ETH/USDT", Side.SHORT, 100.0, 105.0, leg_number=1)
+    position = account.add_limit_fill("ETH/USDT", Side.SHORT, 102.0, 105.0, leg_number=2)
+
+    events = account.process_candle(high=106.0, low=position.tp1 - 1.0, symbol="ETH/USDT")
+    assert [event["type"] for event in events] == ["STOP"]
+    assert position.closed is True
+    assert position.quantity_remaining == pytest.approx(0.0)
+    assert account.margin_used == pytest.approx(0.0)
