@@ -220,3 +220,60 @@ def test_new_limit_entry_candle_still_honors_stop_conservatively():
     )
     assert [event["type"] for event in events] == ["STOP"]
     assert position.closed is True
+
+def test_both_long_limits_filled_in_one_candle_aggregate_to_one_position():
+    from app.demo import DemoAccount, Side
+
+    book = PendingLimitBook()
+    candidate = setup("BUY")
+    book.add(candidate)
+    events = book.process_candle("BTC/USDT", 900_000, 105.0, 100.0, 102.0)
+    assert [(event.leg_number, event.status) for event in events] == [
+        (1, "FILLED"), (2, "FILLED")
+    ]
+
+    account = DemoAccount()
+    position = None
+    for event in events:
+        position = account.add_limit_fill(
+            event.symbol, Side.LONG, event.price, candidate.stop,
+            opened_at="2026-01-01T00:15:00+00:00",
+            leg_number=event.leg_number,
+        )
+    assert position is not None
+    expected_qty = 25.0 / 104.0 + 25.0 / 101.0
+    assert position.quantity_initial == pytest.approx(expected_qty)
+    assert position.entry == pytest.approx(50.0 / expected_qty)
+    assert position.margin_allocated == pytest.approx(10.0)
+    assert len(position.legs) == 2
+    assert len(account.open_positions) == 1
+
+
+def test_two_short_limit_fills_on_separate_candles_share_one_position():
+    from app.demo import DemoAccount, Side
+
+    book = PendingLimitBook()
+    candidate = setup("SELL")
+    book.add(candidate)
+    account = DemoAccount()
+
+    first = book.process_candle("ETH/USDT", 900_000, 107.0, 105.0, 106.0)
+    assert [(event.leg_number, event.status) for event in first] == [(1, "FILLED")]
+    position = account.add_limit_fill(
+        "ETH/USDT", Side.SHORT, first[0].price, candidate.stop,
+        leg_number=first[0].leg_number,
+    )
+    assert position.margin_allocated == pytest.approx(5.0)
+
+    second = book.process_candle("ETH/USDT", 1_800_000, 110.0, 108.0, 109.0)
+    assert [(event.leg_number, event.status) for event in second] == [(2, "FILLED")]
+    position = account.add_limit_fill(
+        "ETH/USDT", Side.SHORT, second[0].price, candidate.stop,
+        leg_number=second[0].leg_number,
+    )
+    expected_qty = 25.0 / 106.0 + 25.0 / 109.0
+    assert position.quantity_initial == pytest.approx(expected_qty)
+    assert position.entry == pytest.approx(50.0 / expected_qty)
+    assert position.margin_allocated == pytest.approx(10.0)
+    assert len(position.legs) == 2
+    assert len(account.open_positions) == 1
