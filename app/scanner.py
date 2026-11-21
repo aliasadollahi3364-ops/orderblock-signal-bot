@@ -169,6 +169,9 @@ class AutomaticScanner:
                 bars = _to_candles(rows)
                 for bar in bars:
                     close_time = bar.timestamp + MS_15M
+                    event_time = datetime.fromtimestamp(
+                        close_time / 1000, timezone.utc
+                    ).isoformat()
                     if close_time > now_ms:
                         continue
                     if setup.last_processed_bar is not None and close_time <= setup.last_processed_bar:
