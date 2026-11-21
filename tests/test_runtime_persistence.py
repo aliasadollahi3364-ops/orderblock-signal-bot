@@ -206,17 +206,18 @@ def _assert_closed_trade_snapshot_survives_restart(tmp_path, exit_kind):
     exit_events = account.process_candle(
         high=candle["high"], low=candle["low"], symbol="BTC/USDT",
     )
-    assert [event["type"] for event in exit_events] == [exit_kind]
+    expected_exit_types = ["STOP"] if exit_kind == "STOP" else ["TP1", "TP2", "TP3"]
+    assert [event["type"] for event in exit_events] == expected_exit_types
     assert position.closed is True
     assert position.quantity_remaining == 0
     assert account.margin_used == 0
 
-    trade_record = {
-        "symbol": "BTC/USDT", "side": "LONG", **exit_events[0],
-        "type": exit_kind, "time": "1970-01-01T00:45:00+00:00",
-        "realized_pnl": position.realized_pnl,
-    }
-    events.append(trade_record)
+    for exit_event in exit_events:
+        events.append({
+            "symbol": "BTC/USDT", "side": "LONG", **exit_event,
+            "time": "1970-01-01T00:45:00+00:00",
+            "realized_pnl": position.realized_pnl,
+        })
     cancelled = book.cancel(
         "BTC/USDT", 2_700_000, "پوزیشن بسته شد؛ لیمیت باقیمانده لغو شد",
     )
@@ -236,20 +237,18 @@ def _assert_closed_trade_snapshot_survives_restart(tmp_path, exit_kind):
     assert restored_account.margin_used == pytest.approx(0)
     assert restored_account.balance == pytest.approx(account.balance)
     assert restored.realized_pnl == pytest.approx(position.realized_pnl)
-    assert restored_events[-1]["type"] == exit_kind
+    assert [event["type"] for event in restored_events if event["type"] in {"TP1", "TP2", "TP3", "STOP"}][-len(expected_exit_types):] == expected_exit_types
     assert restored_events[-1]["realized_pnl"] == pytest.approx(position.realized_pnl)
     assert restored_book.setups["BTC/USDT"].limits[0].status is PendingStatus.FILLED
     assert restored_book.setups["BTC/USDT"].limits[1].status is PendingStatus.CANCELLED
 
     pending = restarted_store.load_notification_outbox()
-    assert {item["event"]["type"] for item in pending} == {
-        exit_kind, "LIMIT_CANCELLED",
-    }
-    assert len(pending) == 2
+    assert {item["event"]["type"] for item in pending} == set(expected_exit_types) | {"LIMIT_CANCELLED"}
+    assert len(pending) == len(expected_exit_types) + 1
 
     # Re-saving the same closed snapshot after restart cannot duplicate exit alerts.
     restarted_store.save_runtime_state(restored_account, restored_events, restored_book)
-    assert len(restarted_store.load_notification_outbox()) == 2
+    assert len(restarted_store.load_notification_outbox()) == len(expected_exit_types) + 1
 
 
 def test_stop_close_and_cancel_are_restored_atomically_after_restart(tmp_path):
