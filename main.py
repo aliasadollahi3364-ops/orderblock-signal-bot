@@ -107,6 +107,11 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
 
     def handle_signal(signal: Signal) -> None:
         if signal.method == "TRENDLINE":
+            # Never attach a fresh pending setup to an already-open demo position.
+            current_position = runtime.account.positions.get(signal.symbol)
+            if current_position is not None and not current_position.closed:
+                logger.info("Open demo position already exists for %s; trendline setup suppressed.", signal.symbol)
+                return
             # The trendline path alerts immediately, then waits for either of
             # the two simulated limit prices to be touched on a later 15m bar.
             try:
