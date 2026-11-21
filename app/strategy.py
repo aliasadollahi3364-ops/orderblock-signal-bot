@@ -235,15 +235,25 @@ class OrderBlockStrategy:
     def _line_value(p1: float, b1: int, p2: float, b2: int, at: int) -> float:
         return p1 + (p2-p1) * (at-b1) / (b2-b1)
 
-    def _nearest_touched_ob_direction(self, candle: Candle) -> int:
-        nearest_direction, nearest_distance = 0, None
+    def _nearest_touched_ob(self, candle: Candle) -> Optional[OrderBlock]:
+        """Return the nearest active OB actually intersected by this candle."""
+        nearest: Optional[OrderBlock] = None
+        nearest_distance: Optional[float] = None
         for ob in self.order_blocks:
-            if not ob.active: continue
+            if not ob.active:
+                continue
             if candle.low <= ob.top and candle.high >= ob.bottom:
-                distance = abs(candle.close-ob.top) if candle.close > ob.top else abs(ob.bottom-candle.close) if candle.close < ob.bottom else 0.0
+                distance = (abs(candle.close - ob.top) if candle.close > ob.top
+                            else abs(ob.bottom - candle.close) if candle.close < ob.bottom
+                            else 0.0)
                 if nearest_distance is None or distance < nearest_distance:
-                    nearest_distance, nearest_direction = distance, ob.direction
-        return nearest_direction
+                    nearest, nearest_distance = ob, distance
+        return nearest
+
+    def _nearest_touched_ob_direction(self, candle: Candle) -> int:
+        # Kept as a compatibility helper for existing tests/callers.
+        ob = self._nearest_touched_ob(candle)
+        return ob.direction if ob is not None else 0
 
     def on_15m_close(self, candle: Candle) -> Optional[Signal]:
         if self._last_15m_timestamp is not None and candle.timestamp <= self._last_15m_timestamp:
@@ -294,7 +304,8 @@ class OrderBlockStrategy:
         short_retest = self._short_pending and self._short_break_bar is not None and idx > self._short_break_bar and candle.high >= self._short_level-tol and candle.low <= self._short_level+tol
         long_confirm = long_retest and candle.close > candle.open and candle.close > self._long_level
         short_confirm = short_retest and candle.close < candle.open and candle.close < self._short_level
-        nearest_dir = self._nearest_touched_ob_direction(candle)
+        nearest_ob = self._nearest_touched_ob(candle)
+        nearest_dir = nearest_ob.direction if nearest_ob is not None else 0
         # The supplied Pine source requires a post-break pullback and confirmation.
         # Never emit a trendline signal on the breakout candle alone.
         tl_long = (cfg.enable_trendline_signals and nearest_dir == 1 and long_confirm and
@@ -347,11 +358,19 @@ class OrderBlockStrategy:
                     return Signal(self.symbol, "SELL", candle.timestamp, candle.close, stop, atr, ob.origin_time, top, bottom, self.trend4h, sma, "ORDER_BLOCK", cfg.risk_reward)
 
         if tl_long:
-            signal = Signal(self.symbol, "BUY", candle.timestamp, candle.close, self._long_sl, atr, 0, 0.0, 0.0, self.trend4h, sma, "TRENDLINE", cfg.risk_reward)
+            # Carry the exact touched OB into the pending-limit layer. A trendline
+            # signal without a concrete active OB must never invent an entry zone.
+            assert nearest_ob is not None
+            signal = Signal(self.symbol, "BUY", candle.timestamp, candle.close, self._long_sl, atr,
+                            nearest_ob.origin_time, nearest_ob.top, nearest_ob.bottom,
+                            self.trend4h, sma, "TRENDLINE", cfg.risk_reward)
             self._long_pending, self._long_level, self._long_break_bar, self._long_sl = False, None, None, None
             return signal
         if tl_short:
-            signal = Signal(self.symbol, "SELL", candle.timestamp, candle.close, self._short_sl, atr, 0, 0.0, 0.0, self.trend4h, sma, "TRENDLINE", cfg.risk_reward)
+            assert nearest_ob is not None
+            signal = Signal(self.symbol, "SELL", candle.timestamp, candle.close, self._short_sl, atr,
+                            nearest_ob.origin_time, nearest_ob.top, nearest_ob.bottom,
+                            self.trend4h, sma, "TRENDLINE", cfg.risk_reward)
             self._short_pending, self._short_level, self._short_break_bar, self._short_sl = False, None, None, None
             return signal
         return None
