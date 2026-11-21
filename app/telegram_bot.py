@@ -116,7 +116,7 @@ MAIN_MENU = ReplyKeyboardMarkup(
         ["/status", "/demo"],
         ["/open", "/stats"],
         ["/panel", "/history"],
-        ["/panel", "/history"],
+        ["🥇 همه اطلاعات طلا"],
         ["مدیریت ارزها", "تنظیمات استراتژی"],
         ["/help", "/menu"],
     ],
@@ -139,6 +139,9 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not await _authorized(update, context):
         return
     text = (update.effective_message.text or "").strip()
+    if text == "🥇 همه اطلاعات طلا":
+        await gold_status(update, context)
+        return
     if text == "مدیریت ارزها":
         answer = "🪙 مدیریت ارزها\n/pairs فهرست ارزها\n/auto_pairs وضعیت انتخاب خودکار\nفقط نام ارز را بفرست (مثال: BTC) برای افزودن ارز\n/remove BTC حذف ارز دستی"
     elif text == "تنظیمات استراتژی":
