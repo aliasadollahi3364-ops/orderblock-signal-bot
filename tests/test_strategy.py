@@ -179,6 +179,9 @@ def test_trendline_break_waits_for_a_later_pullback_and_confirmation():
     assert pullback.method == "TRENDLINE"
     assert pullback.side == "BUY"
     assert pullback.stop < pullback.entry
+    assert pullback.ob_time == 10
+    assert pullback.ob_top == 108.0
+    assert pullback.ob_bottom == 100.0
 
 def test_unqualified_raw_bos_does_not_change_4h_trend():
     cfg = StrategyConfig(pivot4=1, body_len=2, ob_search=3, ob_atr_len=1)
