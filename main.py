@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 import uvicorn
 from telegram import Bot
 from app.api import app
@@ -10,6 +11,7 @@ from app.charting import make_signal_chart
 from app.config import Settings
 from app.demo import DemoAccount
 from app.market_data import WeexMarketData
+from app.gold_market import GoldMarketService, format_gold_signal
 from app.runtime import runtime
 from app.scanner import AutomaticScanner, open_demo_from_signal
 from app.storage import SQLiteStore
@@ -119,6 +121,61 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
         market_data.close()
         if bot is not None: await bot.shutdown()
 
+async def run_gold_scanner(settings: Settings) -> None:
+    """Independent gold investment analysis; it never opens crypto demo or live positions."""
+    if not settings.talasanj_api_key:
+        logger.info("Gold analysis disabled: configure TALASANJ_API_KEY in private HOKAS environment.")
+        return
+    service = GoldMarketService(
+        api_key=settings.talasanj_api_key,
+        database_path=settings.database_path,
+        strategy_config=runtime.strategy_config,
+        client_name=settings.talasanj_client_name,
+        client_url=settings.talasanj_client_url,
+    )
+    runtime.gold_market = service
+    bot = Bot(token=settings.telegram_bot_token) if settings.telegram_bot_token and settings.telegram_chat_id else None
+    if bot is not None:
+        await bot.initialize()
+    logger.info("Gold analysis started; polling every %s seconds.", settings.gold_poll_seconds)
+    try:
+        while True:
+            try:
+                service.update_strategy_config(runtime.strategy_config)
+                signals = await asyncio.to_thread(service.poll_once)
+                analysis = service.investment_analysis()
+                for signal in signals:
+                    # For a 3-6 month investment horizon, only confirmed BUY setups
+                    # from the user's existing 4H/15M strategy can trigger an entry alert.
+                    if signal.side != "BUY" or analysis.get("score", 0) < 65:
+                        continue
+                    alert = (
+                        "🚨 فرصت خرید طلا؛ استراتژی اصلی تأیید کرد\n"
+                        f"امتیاز شرایط بازار: {analysis['score']}/100\n"
+                        f"روش تأیید: {signal.method} (ساختار ۴ساعته + ورود ۱۵دقیقه‌ای)\n"
+                        + format_gold_signal(signal)
+                    )
+                    logger.info("Confirmed gold investment buy opportunity: %s", signal.method)
+                    if bot is not None:
+                        await bot.send_message(chat_id=settings.telegram_chat_id, text=alert)
+                tehran_now = datetime.now(ZoneInfo("Asia/Tehran"))
+                if bot is not None and tehran_now.hour >= settings.gold_daily_report_hour:
+                    report_date = tehran_now.date().isoformat()
+                    if not service.store.has_daily_report(report_date):
+                        await bot.send_message(
+                            chat_id=settings.telegram_chat_id,
+                            text=service.investment_report(),
+                        )
+                        service.store.claim_daily_report(report_date)
+            except Exception as exc:
+                service.last_error = str(exc)[:400]
+                logger.exception("Gold investment analysis failed")
+            await asyncio.sleep(settings.gold_poll_seconds)
+    finally:
+        if bot is not None:
+            await bot.shutdown()
+
+
 async def main() -> None:
     settings = Settings()
     settings.assert_demo_only()
@@ -133,7 +190,7 @@ async def main() -> None:
     loop = asyncio.get_running_loop()
     server = uvicorn.Server(uvicorn.Config(app, host=settings.host, port=settings.port, log_level="info"))
     await asyncio.gather(server.serve(), run_telegram(settings.telegram_bot_token, settings.telegram_chat_id),
-                         run_scanner(settings, loop))
+                         run_scanner(settings, loop), run_gold_scanner(settings))
 
 if __name__ == "__main__":
     asyncio.run(main())

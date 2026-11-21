@@ -22,6 +22,7 @@ class BotRuntime:
     storage: Any = None
     market_symbol_resolver: Any = None
     strategy_config: StrategyConfig = field(default_factory=StrategyConfig)
+    gold_market: Any = None
 
     def persist_demo_state(self) -> None:
         if self.storage is not None:
