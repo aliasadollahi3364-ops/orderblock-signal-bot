@@ -63,11 +63,15 @@ class StrategyConfig:
     sma_length: int = 200
     use_sma200_filter: bool = True
     min_tick: float = 0.00000001
+    enable_rsi_divergence: bool = True
+    rsi_length: int = 14
+    rsi_divergence_lookback: int = 20
 
     def __post_init__(self) -> None:
         for name in ("pivot4", "body_len", "ob_search", "max_stored_ob", "ob_atr_len",
                      "pivot15", "max_wait", "atr_len", "max_bars_since_touch",
-                     "trendline_pullback_max_wait", "sma_length"):
+                     "trendline_pullback_max_wait", "sma_length",
+                     "rsi_length", "rsi_divergence_lookback"):
             if getattr(self, name) < 1:
                 raise ValueError(f"{name} must be positive")
         if self.min_tick <= 0:
@@ -105,6 +109,8 @@ class Signal:
     method: str = "ORDER_BLOCK"
     risk_reward: float = 2.5
     volume_weighted_price: Optional[float] = None
+    rsi_divergence: str = "NONE"
+    rsi_value: Optional[float] = None
 
     @property
     def risk_distance(self) -> float:
@@ -165,6 +171,11 @@ class OrderBlockStrategy:
         self._short_break_bar: Optional[int] = None
         self._long_sl: Optional[float] = None
         self._short_sl: Optional[float] = None
+        self._previous_rsi_pivot_low: Optional[float] = None
+        self._previous_rsi_pivot_high: Optional[float] = None
+        self._bullish_divergence_bar: Optional[int] = None
+        self._bearish_divergence_bar: Optional[int] = None
+        self._rsi_values: list[Optional[float]] = []
 
     @staticmethod
     def _pivot_high(bars: list[Candle], candidate: int, left: int, right: int) -> bool:
@@ -269,6 +280,42 @@ class OrderBlockStrategy:
             total_volume += bar.volume
         return weighted_sum / total_volume if total_volume > 0 else (top + bottom) / 2.0
 
+    def _update_rsi(self, close: float) -> Optional[float]:
+        """Wilder RSI; values align one-to-one with confirmed 15m candles."""
+        closes = [bar.close for bar in self.candles15]
+        if len(closes) < self.cfg.rsi_length + 1:
+            self._rsi_values.append(None)
+            return None
+        changes = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+        gains = [max(change, 0.0) for change in changes]
+        losses = [max(-change, 0.0) for change in changes]
+        length = self.cfg.rsi_length
+        avg_gain = sum(gains[:length]) / length
+        avg_loss = sum(losses[:length]) / length
+        for i in range(length, len(gains)):
+            avg_gain = (avg_gain * (length - 1) + gains[i]) / length
+            avg_loss = (avg_loss * (length - 1) + losses[i]) / length
+        if avg_loss <= 0:
+            value = 100.0 if avg_gain > 0 else 50.0
+        else:
+            rs = avg_gain / avg_loss
+            value = 100.0 - (100.0 / (1.0 + rs))
+        self._rsi_values.append(value)
+        return value
+
+    def _signal_rsi_context(self, side: str, bar_index: int) -> tuple[str, Optional[float]]:
+        if not self.cfg.enable_rsi_divergence:
+            return "DISABLED", self._rsi_values[bar_index] if bar_index < len(self._rsi_values) else None
+        lookback = self.cfg.rsi_divergence_lookback
+        bullish_recent = self._bullish_divergence_bar is not None and bar_index - self._bullish_divergence_bar <= lookback
+        bearish_recent = self._bearish_divergence_bar is not None and bar_index - self._bearish_divergence_bar <= lookback
+        if side == "BUY":
+            state = "BULLISH" if bullish_recent else "BEARISH" if bearish_recent else "NONE"
+        else:
+            state = "BEARISH" if bearish_recent else "BULLISH" if bullish_recent else "NONE"
+        value = self._rsi_values[bar_index] if bar_index < len(self._rsi_values) else None
+        return state, value
+
     def on_15m_close(self, candle: Candle) -> Optional[Signal]:
         if self._last_15m_timestamp is not None and candle.timestamp <= self._last_15m_timestamp:
             raise ValueError("15m candles must be strictly chronological.")
@@ -276,10 +323,25 @@ class OrderBlockStrategy:
         previous_close = bars[-1].close if bars else None
         bars.append(candle)
         idx = len(bars)-1
+        current_rsi = self._update_rsi(candle.close)
         self._tr15.append(_tr(candle, previous_close))
         atr = _atr(self._tr15, self.cfg.atr_len)
         candidate = idx-self.cfg.pivot15
         if candidate >= 0:
+            candidate_rsi = self._rsi_values[candidate] if candidate < len(self._rsi_values) else None
+            if self.cfg.enable_rsi_divergence and candidate_rsi is not None:
+                if self._pivot_low(bars, candidate, self.cfg.pivot15, self.cfg.pivot15):
+                    if (self.prev_pl15 is not None and self._previous_rsi_pivot_low is not None
+                            and bars[candidate].low < self.prev_pl15
+                            and candidate_rsi > self._previous_rsi_pivot_low):
+                        self._bullish_divergence_bar = idx
+                    self._previous_rsi_pivot_low = candidate_rsi
+                if self._pivot_high(bars, candidate, self.cfg.pivot15, self.cfg.pivot15):
+                    if (self.prev_ph15 is not None and self._previous_rsi_pivot_high is not None
+                            and bars[candidate].high > self.prev_ph15
+                            and candidate_rsi < self._previous_rsi_pivot_high):
+                        self._bearish_divergence_bar = idx
+                    self._previous_rsi_pivot_high = candidate_rsi
             if self._pivot_high(bars, candidate, self.cfg.pivot15, self.cfg.pivot15):
                 self.prev_ph15, self.prev_ph15_bar = self.last_ph15, self.last_ph15_bar
                 self.last_ph15, self.last_ph15_bar = bars[candidate].high, candidate
@@ -362,31 +424,41 @@ class OrderBlockStrategy:
                 if candle.close-stop >= cfg.min_tick:
                     if cfg.use_sma200_filter and (sma is None or candle.close <= sma): continue
                     ob.used = True
-                    return Signal(self.symbol, "BUY", candle.timestamp, candle.close, stop, atr, ob.origin_time, top, bottom, self.trend4h, sma, "ORDER_BLOCK", cfg.risk_reward)
+                    rsi_state, rsi_value = self._signal_rsi_context("BUY", idx)
+                return Signal(self.symbol, "BUY", candle.timestamp, candle.close, stop, atr,
+                              ob.origin_time, top, bottom, self.trend4h, sma, "ORDER_BLOCK",
+                              cfg.risk_reward, None, rsi_state, rsi_value)
             if can_use and retest and direction == -1 and bear_dir and bear_power and self.last_ph15 is not None:
                 base = max(self.last_ph15, top) if cfg.use_ob_boundary_sl else self.last_ph15
                 stop = base+atr*cfg.sl_buffer_atr
                 if stop-candle.close >= cfg.min_tick:
                     if cfg.use_sma200_filter and (sma is None or candle.close >= sma): continue
                     ob.used = True
-                    return Signal(self.symbol, "SELL", candle.timestamp, candle.close, stop, atr, ob.origin_time, top, bottom, self.trend4h, sma, "ORDER_BLOCK", cfg.risk_reward)
+                    rsi_state, rsi_value = self._signal_rsi_context("SELL", idx)
+                return Signal(self.symbol, "SELL", candle.timestamp, candle.close, stop, atr,
+                              ob.origin_time, top, bottom, self.trend4h, sma, "ORDER_BLOCK",
+                              cfg.risk_reward, None, rsi_state, rsi_value)
 
         if tl_long:
             # Carry the exact touched OB into the pending-limit layer. A trendline
             # signal without a concrete active OB must never invent an entry zone.
             assert nearest_ob is not None
+            rsi_state, rsi_value = self._signal_rsi_context("BUY", idx)
             signal = Signal(self.symbol, "BUY", candle.timestamp, candle.close, self._long_sl, atr,
                             nearest_ob.origin_time, nearest_ob.top, nearest_ob.bottom,
                             self.trend4h, sma, "TRENDLINE", cfg.risk_reward,
-                            self._ob_volume_weighted_price(bars, nearest_ob.top, nearest_ob.bottom))
+                            self._ob_volume_weighted_price(bars, nearest_ob.top, nearest_ob.bottom),
+                            rsi_state, rsi_value)
             self._long_pending, self._long_level, self._long_break_bar, self._long_sl = False, None, None, None
             return signal
         if tl_short:
             assert nearest_ob is not None
+            rsi_state, rsi_value = self._signal_rsi_context("SELL", idx)
             signal = Signal(self.symbol, "SELL", candle.timestamp, candle.close, self._short_sl, atr,
                             nearest_ob.origin_time, nearest_ob.top, nearest_ob.bottom,
                             self.trend4h, sma, "TRENDLINE", cfg.risk_reward,
-                            self._ob_volume_weighted_price(bars, nearest_ob.top, nearest_ob.bottom))
+                            self._ob_volume_weighted_price(bars, nearest_ob.top, nearest_ob.bottom),
+                            rsi_state, rsi_value)
             self._short_pending, self._short_level, self._short_break_bar, self._short_sl = False, None, None, None
             return signal
         return None
