@@ -122,10 +122,9 @@ class AutomaticScanner:
         self._last_signal_bar: dict[str, int] = {}
         self._selected: list[str] = []
 
-    def _cancel_pending_after_position_close(self, symbol: str, timestamp: int) -> None:
-        cancelled = runtime.pending_limits.cancel(
-            symbol, timestamp, "پوزیشن دمو بسته شد؛ لیمیت باقیمانده دیگر معتبر نیست"
-        )
+    def _cancel_remaining_pending(self, symbol: str, timestamp: int, reason: str) -> None:
+        """Cancel any unfilled entry leg once the shared position reaches an exit milestone."""
+        cancelled = runtime.pending_limits.cancel(symbol, timestamp, reason)
         if not cancelled:
             return
         runtime.persist_pending_limits()
@@ -253,7 +252,15 @@ class AutomaticScanner:
                         if trade_events:
                             runtime.persist_demo_state()
                         if position.closed:
-                            self._cancel_pending_after_position_close(symbol, close_time)
+                            self._cancel_remaining_pending(
+                                symbol, close_time,
+                                "پوزیشن دمو بسته شد؛ لیمیت باقیمانده دیگر معتبر نیست",
+                            )
+                        elif any(event.get("type") in {"TP1", "TP2", "TP3"} for event in trade_events):
+                            self._cancel_remaining_pending(
+                                symbol, close_time,
+                                "هدف سود فعال شد؛ ورود عمیق‌تر برای همین معامله لغو شد",
+                            )
 
                     # Persist the candle cursor even when no pending event fired,
                     # so a restart cannot replay an already-managed OHLC range.
@@ -339,8 +346,14 @@ class AutomaticScanner:
                 if events:
                     runtime.persist_demo_state()
                 if position.closed:
-                    self._cancel_pending_after_position_close(
-                        position.symbol, bar.timestamp + MS_15M
+                    self._cancel_remaining_pending(
+                        position.symbol, bar.timestamp + MS_15M,
+                        "پوزیشن دمو بسته شد؛ لیمیت باقیمانده دیگر معتبر نیست",
+                    )
+                elif any(event.get("type") in {"TP1", "TP2", "TP3"} for event in events):
+                    self._cancel_remaining_pending(
+                        position.symbol, bar.timestamp + MS_15M,
+                        "هدف سود فعال شد؛ ورود عمیق‌تر برای همین معامله لغو شد",
                     )
             except Exception:
                 errors += 1
