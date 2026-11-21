@@ -23,32 +23,72 @@ from app.telegram_notifications import format_notification
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("orderblock-signal-bot")
 
+async def telegram_request_with_retry(bot: Bot, method: str, **kwargs):
+    """Initialize the Bot lazily and retry transient Telegram network failures."""
+    delay = 1
+    last_error = None
+    for attempt in range(3):
+        try:
+            await bot.initialize()
+            operation = getattr(bot, method)
+            return await operation(**kwargs)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            last_error = exc
+            if attempt < 2:
+                logger.warning("Telegram %s failed (attempt %s/3): %s", method, attempt + 1, exc)
+                await asyncio.sleep(delay)
+                delay *= 2
+    raise last_error
+
 async def run_telegram(token: str, chat_id: str) -> None:
     if not token or not chat_id:
         logger.warning("Telegram disabled: configure TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.")
         await asyncio.Event().wait()
         return
-    application = build_telegram_application(token, chat_id)
-    await application.initialize()
-    await application.start()
-    if application.updater is None:
-        raise RuntimeError("Telegram updater unavailable.")
-    await application.updater.start_polling()
-    try:
-        await asyncio.Event().wait()
-    finally:
-        await application.updater.stop()
-        await application.stop()
-        await application.shutdown()
+    delay = 2
+    while True:
+        application = build_telegram_application(token, chat_id)
+        try:
+            await application.initialize()
+            await application.start()
+            if application.updater is None:
+                raise RuntimeError("Telegram updater unavailable.")
+            await application.updater.start_polling()
+            logger.info("Telegram polling started successfully.")
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Telegram startup/polling failed; retrying in %s seconds.", delay)
+        finally:
+            try:
+                if application.updater is not None and application.updater.running:
+                    await application.updater.stop()
+            except Exception:
+                logger.exception("Telegram updater cleanup failed.")
+            try:
+                if application.running:
+                    await application.stop()
+            except Exception:
+                logger.exception("Telegram application cleanup failed.")
+            try:
+                await application.shutdown()
+            except Exception:
+                logger.exception("Telegram shutdown cleanup failed.")
+        await asyncio.sleep(delay)
+        delay = min(delay * 2, 60)
 
 async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> None:
     market_data = WeexMarketData(settings.exchange_id, settings.quote_currency)
     runtime.market_symbol_resolver = market_data.resolve_manual_symbol
     bot = Bot(token=settings.telegram_bot_token) if settings.telegram_bot_token and settings.telegram_chat_id else None
-    if bot is not None: await bot.initialize()
     def send(text: str) -> None:
         if bot is not None:
-            future = asyncio.run_coroutine_threadsafe(bot.send_message(chat_id=settings.telegram_chat_id, text=text), loop)
+            future = asyncio.run_coroutine_threadsafe(
+                telegram_request_with_retry(bot, "send_message", chat_id=settings.telegram_chat_id, text=text), loop
+            )
             future.add_done_callback(lambda result: logger.error("Telegram notification failed: %s", result.exception()) if result.exception() else None)
     async def send_signal_photo(signal: Signal, position) -> None:
         if bot is None: return
@@ -78,7 +118,7 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
                 "زمان خروج: پس از برخورد به حد ضرر یا اهداف، در پیام رویداد ثبت می‌شود.\n"
                 "حالت: فقط دمو | معاملات واقعی: خاموش"
             )
-            await bot.send_photo(chat_id=settings.telegram_chat_id, photo=chart, caption=caption)
+            await telegram_request_with_retry(bot, "send_photo", chat_id=settings.telegram_chat_id, photo=chart, caption=caption)
         except Exception:
             logger.exception("Could not create/send signal chart for %s", signal.symbol)
             send(f"📣 سیگنال دمو {signal.symbol} | {signal.side}\nروش ورود: {signal.method}\nورود: {signal.entry:g}\nحد ضرر: {signal.stop:g}\nفقط دمو؛ معاملات واقعی خاموش")
@@ -102,7 +142,7 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
                 "اهداف روی نمودار برای هر ورود تخمینی‌اند؛ پس از پرشدن سفارش‌ها، میانگین ورود و اهداف مشترک پوزیشن به‌روز می‌شوند.\n"
                 "مارجین هر لیمیت: ۵ دلار | حداکثر مارجین کل: ۱۰ دلار. فقط حساب دمو."
             )
-            await bot.send_photo(chat_id=settings.telegram_chat_id, photo=chart, caption=caption)
+            await telegram_request_with_retry(bot, "send_photo", chat_id=settings.telegram_chat_id, photo=chart, caption=caption)
         except Exception:
             logger.exception("Could not create/send two-limit chart for %s", signal.symbol)
 
@@ -208,27 +248,33 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
     async def dispatch_notifications() -> None:
         if bot is None:
             return
+        retry_delay = 2
         while True:
             try:
                 queued = await asyncio.to_thread(runtime.storage.load_notification_outbox, 50)
                 for item in queued:
                     message = format_notification(item)
                     try:
-                        await bot.send_message(chat_id=settings.telegram_chat_id, text=message)
+                        await telegram_request_with_retry(
+                            bot, "send_message", chat_id=settings.telegram_chat_id, text=message
+                        )
+                    except asyncio.CancelledError:
+                        raise
                     except Exception:
-                        logger.exception("Telegram outbox delivery failed for %s", item["event_id"])
+                        logger.exception("Telegram outbox delivery failed for %s; it remains queued.", item["event_id"])
                         break
-                    # Mark only after Telegram confirms success. A crash in the
-                    # tiny send/mark window can cause a retry; Telegram offers
-                    # no idempotency key for sendMessage, so delivery is at-least-once.
                     await asyncio.to_thread(
                         runtime.storage.mark_notification_delivered,
                         item["event_id"],
                         datetime.now(timezone.utc).isoformat(),
                     )
+                    retry_delay = 2
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 logger.exception("Notification outbox dispatcher failed")
-            await asyncio.sleep(2)
+            await asyncio.sleep(retry_delay)
+            retry_delay = min(retry_delay * 2, 60)
 
     scanner = AutomaticScanner(market_data=market_data, strategy_config=runtime.strategy_config,
         universe_limit=settings.scanner_universe_limit, candidate_limit=settings.scanner_candidate_limit,
@@ -258,12 +304,18 @@ async def run_gold_scanner(settings: Settings) -> None:
     )
     runtime.gold_market = service
     bot = Bot(token=settings.telegram_bot_token) if settings.telegram_bot_token and settings.telegram_chat_id else None
-    if bot is not None:
-        await bot.initialize()
+    bot_initialized = False
     logger.info("Gold analysis started; polling every %s seconds.", settings.gold_poll_seconds)
     try:
         while True:
             try:
+                if bot is not None and not bot_initialized:
+                    try:
+                        await bot.initialize()
+                        bot_initialized = True
+                        logger.info("Gold Telegram notifications initialized.")
+                    except Exception as exc:
+                        logger.warning("Gold Telegram unavailable; analysis continues without notifications: %s", exc)
                 service.update_strategy_config(runtime.strategy_config)
                 signals = await asyncio.to_thread(service.poll_once)
                 analysis = service.investment_analysis()
@@ -280,13 +332,13 @@ async def run_gold_scanner(settings: Settings) -> None:
                     )
                     logger.info("Confirmed gold investment buy opportunity: %s", signal.method)
                     if bot is not None:
-                        await bot.send_message(chat_id=settings.telegram_chat_id, text=alert)
+                        await telegram_request_with_retry(bot, "send_message", chat_id=settings.telegram_chat_id, text=alert)
                 tehran_now = datetime.now(ZoneInfo("Asia/Tehran"))
                 if bot is not None and tehran_now.hour >= settings.gold_daily_report_hour:
                     report_date = tehran_now.date().isoformat()
                     if not service.store.has_daily_report(report_date):
-                        await bot.send_message(
-                            chat_id=settings.telegram_chat_id,
+                        await telegram_request_with_retry(
+                            bot, "send_message", chat_id=settings.telegram_chat_id,
                             text=service.investment_report(),
                         )
                         service.store.claim_daily_report(report_date)
