@@ -557,6 +557,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/start - شروع\n/status - وضعیت ربات\n/demo - موجودی دمو\n"
         "/open - معاملات باز\n/panel - پنل حرفه‌ای حساب دمو\n/history - تاریخچه معاملات\n/pairs - فهرست ارزها\nارسال نام ارز مثل BTC - افزودن ارز دستی\n/add BTC - روش جایگزین افزودن\n"
         "/remove BTC - حذف ارز دستی\n/auto_pairs - وضعیت انتخاب خودکار\n/stats - آمار حساب\n"
+        "/gold - گزارش و وضعیت تحلیل طلای ۱۸ عیار\\n"
         "/strategy - نمایش تنظیمات\n/set pivot4 4 - تغییر عدد\n"
         "/enable trendline - فعال‌کردن سیگنال خط روند\n/disable trendline - غیرفعال‌کردن آن\n"
         "/enable trendline_sma - فیلتر SMA200 خط روند\n"
