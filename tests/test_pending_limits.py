@@ -277,3 +277,62 @@ def test_two_short_limit_fills_on_separate_candles_share_one_position():
     assert position.margin_allocated == pytest.approx(10.0)
     assert len(position.legs) == 2
     assert len(account.open_positions) == 1
+
+
+def test_atomic_runtime_snapshot_restores_open_position_and_remaining_limit_after_restart(tmp_path):
+    from app.demo import DemoAccount, Side
+
+    store = SQLiteStore(str(tmp_path / "runtime-restart.sqlite3"))
+    book = PendingLimitBook()
+    candidate = setup("BUY")
+    book.add(candidate)
+    account = DemoAccount(fee_rate=0)
+
+    # First leg fills before shutdown; second leg is still pending.
+    first_events = book.process_candle("BTC/USDT", 900_000, 105.0, 103.0, 104.0)
+    assert [(event.leg_number, event.status) for event in first_events] == [(1, "FILLED")]
+    account.add_limit_fill(
+        "BTC/USDT", Side.LONG, first_events[0].price, candidate.stop,
+        opened_at="2026-01-01T00:15:00+00:00", leg_number=first_events[0].leg_number,
+    )
+    event_history = [{"symbol": "BTC/USDT", "type": "OPEN", "time": "2026-01-01T00:15:00+00:00"}]
+    store.save_runtime_state(account, event_history, book)
+
+    # Simulate a fresh process loading its complete runtime snapshot.
+    restored_account, restored_events = store.load_state(DemoAccount(fee_rate=0))
+    restored_book = store.load_pending_setups()
+    restored_setup = restored_book.setups["BTC/USDT"]
+    restored_position = restored_account.positions["BTC/USDT"]
+
+    assert restored_events == event_history
+    assert restored_position.closed is False
+    assert len(restored_position.legs) == 1
+    assert restored_position.margin_allocated == pytest.approx(5.0)
+    assert restored_setup.last_processed_bar == 900_000
+    assert restored_setup.limits[0].status is PendingStatus.FILLED
+    assert restored_setup.limits[1].status is PendingStatus.PENDING
+
+    # Replaying the candle processed before shutdown cannot duplicate leg 1.
+    assert restored_book.process_candle("BTC/USDT", 900_000, 105.0, 103.0, 104.0) == []
+    second_events = restored_book.process_candle(
+        "BTC/USDT", 1_800_000, 102.0, 100.0, 101.0
+    )
+    assert [(event.leg_number, event.status) for event in second_events] == [(2, "FILLED")]
+    restored_account.add_limit_fill(
+        "BTC/USDT", Side.LONG, second_events[0].price, restored_setup.stop,
+        opened_at="2026-01-01T00:30:00+00:00", leg_number=second_events[0].leg_number,
+    )
+
+    # A second atomic snapshot must restore the weighted, single-position ledger.
+    store.save_runtime_state(restored_account, restored_events, restored_book)
+    final_account, _ = store.load_state(DemoAccount(fee_rate=0))
+    final_book = store.load_pending_setups()
+    final_position = final_account.positions["BTC/USDT"]
+    assert len(final_account.open_positions) == 1
+    assert len(final_position.legs) == 2
+    expected_qty = 25.0 / 104.0 + 25.0 / 101.0
+    assert final_position.quantity_initial == pytest.approx(expected_qty)
+    assert final_position.entry == pytest.approx(50.0 / expected_qty)
+    assert final_position.margin_allocated == pytest.approx(10.0)
+    assert final_book.setups["BTC/USDT"].limits[1].status is PendingStatus.FILLED
+    assert final_book.setups["BTC/USDT"].last_processed_bar == 1_800_000
