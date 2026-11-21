@@ -199,7 +199,7 @@ class DemoAccount:
         assert self.balance is not None
         self.balance += gross - fee
 
-    def _process_limit_legs(self, pos: DemoPosition, high: float, low: float) -> list[dict[str, float | str]]:
+    def _process_limit_legs(self, pos: DemoPosition, high: float, low: float, *, allow_targets: bool = True) -> list[dict[str, float | str]]:
         """Manage all filled limit entries as one position with shared exits."""
         events: list[dict[str, float | str]] = []
         long_side = pos.side is Side.LONG
@@ -215,6 +215,11 @@ class DemoAccount:
             else:
                 stop_event = "STOP"
             events.append({"type": stop_event, "price": price})
+            return events
+
+        # A limit may fill at any point inside this OHLC candle. Its earlier
+        # high/low cannot safely be used to award a profit target.
+        if not allow_targets:
             return events
 
         def target_hit(target: float) -> bool:
@@ -251,8 +256,13 @@ class DemoAccount:
             events.append({"type": "TP3", "price": pos.tp3})
         return events
 
-    def process_candle(self, high: float, low: float, symbol: Optional[str] = None) -> list[dict[str, float | str]]:
-        """Process one completed OHLC range; the stop wins ambiguous initial bars."""
+    def process_candle(self, high: float, low: float, symbol: Optional[str] = None, *,
+                       allow_targets: bool = True) -> list[dict[str, float | str]]:
+        """Process a completed OHLC range; stops win ambiguous bars.
+
+        Disable targets on a candle with a new limit fill because OHLC cannot
+        establish whether its high/low occurred before or after the entry.
+        """
         if high < low:
             raise ValueError("Candle high cannot be below low.")
         if symbol is None:
@@ -265,7 +275,7 @@ class DemoAccount:
         if pos is None or pos.closed:
             return []
         if pos.legs:
-            return self._process_limit_legs(pos, high, low)
+            return self._process_limit_legs(pos, high, low, allow_targets=allow_targets)
 
         events: list[dict[str, float | str]] = []
         long_side = pos.side is Side.LONG
@@ -275,6 +285,9 @@ class DemoAccount:
             self._close_fraction(pos, 1.0, exit_price)
             pos.closed = True
             events.append({"type": "STOP", "price": exit_price})
+            return events
+
+        if not allow_targets:
             return events
 
         def target_hit(target: float) -> bool:
