@@ -413,7 +413,7 @@ def _assert_two_filled_legs_exit_survives_restart(tmp_path, exit_kind):
         high, low = 105, 97
         expected = ["STOP"]
     elif exit_kind == "TP3":
-        high, low = restored.tp3 + 1, restored.entry + 0.1
+        high, low = restored.tp3 + 1, restored.tp1 + 0.1
         expected = ["TP1", "TP2", "TP3"]
     else:
         raise AssertionError(f"Unexpected exit kind: {exit_kind}")
