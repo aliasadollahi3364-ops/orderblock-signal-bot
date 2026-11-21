@@ -161,6 +161,7 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
                     f"لیمیت ۱ (نزدیک‌تر): {near:g} | TP1: {t1:g} | TP2: {t2:g} | TP3: {t3:g}\n"
                     f"لیمیت ۲ (عمیق‌تر): {deep:g} | TP1: {u1:g} | TP2: {u2:g} | TP3: {u3:g}\n"
                     f"حد ضرر ساختاری: {signal.stop:g}\n"
+                    "مارجین هر لیمیت: ۵ دلار | در صورت پرشدن هر دو: ۱۰ دلار مارجین\n"
                     f"زمان تأیید: {entry_time}\n"
                     "وضعیت: منتظر پولبک و لمس هر لیمیت؛ تا قبل از لمس، معامله‌ای در حساب دمو باز نیست.\n"
                     "قیمت وزنی از OHLCV و حجم کندل‌ها تخمین زده شده؛ دفتر سفارش یا Volume Profile واقعی نیست.\n"
