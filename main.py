@@ -11,6 +11,7 @@ from app.charting import make_signal_chart
 from app.config import Settings
 from app.demo import DemoAccount
 from app.market_data import WeexMarketData
+from app.pending_limits import PendingLimit, PendingSetup, make_two_limit_prices
 from app.gold_market import GoldMarketService, format_gold_signal
 from app.runtime import runtime
 from app.scanner import AutomaticScanner, open_demo_from_signal
@@ -69,6 +70,62 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
             logger.exception("Could not create/send signal chart for %s", signal.symbol)
             send(f"📣 سیگنال دمو {signal.symbol} | {signal.side}\nروش ورود: {signal.method}\nورود: {signal.entry:g}\nحد ضرر: {signal.stop:g}\nفقط دمو؛ معاملات واقعی خاموش")
     def handle_signal(signal: Signal) -> None:
+        if signal.method == "TRENDLINE":
+            # The trendline path alerts immediately, then waits for either of
+            # the two simulated limit prices to be touched on a later 15m bar.
+            try:
+                if signal.ob_top <= signal.ob_bottom or signal.volume_weighted_price is None:
+                    raise ValueError("سیگنال خط روند محدوده اردربلاک معتبر یا قیمت وزنی حجم ندارد.")
+                near, deep = make_two_limit_prices(
+                    signal.side, signal.ob_top, signal.ob_bottom,
+                    signal.volume_weighted_price,
+                )
+                created_at = signal.timestamp + 15 * 60 * 1000
+                existing = runtime.pending_limits.setups.get(signal.symbol)
+                if existing is not None and existing.active:
+                    logger.info("Pending setup already active for %s; duplicate alert suppressed.", signal.symbol)
+                    return
+                if existing is not None and existing.created_at == created_at:
+                    logger.info("Replayed trendline signal suppressed for %s.", signal.symbol)
+                    return
+                setup = PendingSetup(
+                    symbol=signal.symbol,
+                    side=signal.side,
+                    created_at=created_at,
+                    expires_after_bars=runtime.strategy_config.trendline_pullback_max_wait,
+                    invalidation=signal.stop,
+                    stop=signal.stop,
+                    ob_top=signal.ob_top,
+                    ob_bottom=signal.ob_bottom,
+                    limits=[PendingLimit(1, near), PendingLimit(2, deep)],
+                )
+                runtime.pending_limits.add(setup)
+                runtime.persist_pending_limits()
+                def targets(entry: float) -> tuple[float, float, float]:
+                    risk = abs(entry - signal.stop)
+                    sign = 1.0 if signal.side == "BUY" else -1.0
+                    return (entry + sign * risk, entry + sign * 2 * risk, entry + sign * 3 * risk)
+                t1, t2, t3 = targets(near)
+                u1, u2, u3 = targets(deep)
+                entry_time = datetime.fromtimestamp(created_at / 1000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+                alert = (
+                    f"🚨 هشدار زودهنگام شکست خط روند + تأیید اردربلاک | {signal.symbol}\n"
+                    f"جهت: {signal.side} | تایم‌فریم: ۱۵ دقیقه\n"
+                    f"لیمیت ۱ (نزدیک‌تر): {near:g} | TP1: {t1:g} | TP2: {t2:g} | TP3: {t3:g}\n"
+                    f"لیمیت ۲ (عمیق‌تر): {deep:g} | TP1: {u1:g} | TP2: {u2:g} | TP3: {u3:g}\n"
+                    f"حد ضرر ساختاری: {signal.stop:g}\n"
+                    f"زمان تأیید: {entry_time}\n"
+                    "وضعیت: منتظر پولبک و لمس هر لیمیت؛ تا قبل از لمس، معامله‌ای در حساب دمو باز نیست.\n"
+                    "قیمت وزنی از OHLCV و حجم کندل‌ها تخمین زده شده؛ دفتر سفارش یا Volume Profile واقعی نیست.\n"
+                    "حساب دمو | معاملات واقعی: خاموش"
+                )
+                send(alert)
+            except (ValueError, TypeError) as exc:
+                logger.warning("Trendline pending setup rejected for %s: %s", signal.symbol, exc)
+                send(f"⚠️ سیگنال خط روند {signal.symbol} ایجاد نشد: {exc}")
+            return
+
+        # Preserve the existing order-block-only demo entry flow unchanged.
         position = open_demo_from_signal(signal)
         if position is not None:
             runtime.closed_trade_events.append({
