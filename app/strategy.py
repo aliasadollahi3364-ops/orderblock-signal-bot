@@ -104,6 +104,7 @@ class Signal:
     sma200: Optional[float]
     method: str = "ORDER_BLOCK"
     risk_reward: float = 2.5
+    volume_weighted_price: Optional[float] = None
 
     @property
     def risk_distance(self) -> float:
@@ -255,6 +256,19 @@ class OrderBlockStrategy:
         ob = self._nearest_touched_ob(candle)
         return ob.direction if ob is not None else 0
 
+    @staticmethod
+    def _ob_volume_weighted_price(candles: list[Candle], top: float, bottom: float) -> Optional[float]:
+        """Approximate a zone VW price from available OHLCV candles, not true volume profile."""
+        weighted_sum = total_volume = 0.0
+        for bar in candles[-32:]:
+            if bar.high < bottom or bar.low > top or bar.volume <= 0:
+                continue
+            typical = (bar.high + bar.low + bar.close) / 3.0
+            typical = min(top, max(bottom, typical))
+            weighted_sum += typical * bar.volume
+            total_volume += bar.volume
+        return weighted_sum / total_volume if total_volume > 0 else (top + bottom) / 2.0
+
     def on_15m_close(self, candle: Candle) -> Optional[Signal]:
         if self._last_15m_timestamp is not None and candle.timestamp <= self._last_15m_timestamp:
             raise ValueError("15m candles must be strictly chronological.")
@@ -363,14 +377,16 @@ class OrderBlockStrategy:
             assert nearest_ob is not None
             signal = Signal(self.symbol, "BUY", candle.timestamp, candle.close, self._long_sl, atr,
                             nearest_ob.origin_time, nearest_ob.top, nearest_ob.bottom,
-                            self.trend4h, sma, "TRENDLINE", cfg.risk_reward)
+                            self.trend4h, sma, "TRENDLINE", cfg.risk_reward,
+                            self._ob_volume_weighted_price(bars, nearest_ob.top, nearest_ob.bottom))
             self._long_pending, self._long_level, self._long_break_bar, self._long_sl = False, None, None, None
             return signal
         if tl_short:
             assert nearest_ob is not None
             signal = Signal(self.symbol, "SELL", candle.timestamp, candle.close, self._short_sl, atr,
                             nearest_ob.origin_time, nearest_ob.top, nearest_ob.bottom,
-                            self.trend4h, sma, "TRENDLINE", cfg.risk_reward)
+                            self.trend4h, sma, "TRENDLINE", cfg.risk_reward,
+                            self._ob_volume_weighted_price(bars, nearest_ob.top, nearest_ob.bottom))
             self._short_pending, self._short_level, self._short_break_bar, self._short_sl = False, None, None, None
             return signal
         return None
