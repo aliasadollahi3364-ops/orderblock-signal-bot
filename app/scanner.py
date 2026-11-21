@@ -122,12 +122,20 @@ class AutomaticScanner:
         self._last_signal_bar: dict[str, int] = {}
         self._selected: list[str] = []
 
-    def _cancel_remaining_pending(self, symbol: str, timestamp: int, reason: str) -> None:
-        """Cancel any unfilled entry leg once the shared position reaches an exit milestone."""
+    def _cancel_remaining_pending(self, symbol: str, timestamp: int, reason: str,
+                                  *, persist: bool = True, notify: bool = True) -> list[Any]:
+        """Cancel unfilled legs; callers may defer persistence/notifications for an atomic exit snapshot."""
         cancelled = runtime.pending_limits.cancel(symbol, timestamp, reason)
         if not cancelled:
-            return
-        runtime.persist_pending_limits()
+            return []
+        if persist:
+            runtime.persist_pending_limits()
+        if notify:
+            self._notify_pending_cancellations(symbol, timestamp, cancelled)
+        return cancelled
+
+    def _notify_pending_cancellations(self, symbol: str, timestamp: int,
+                                      cancelled: list[Any]) -> None:
         event_time = datetime.fromtimestamp(timestamp / 1000, timezone.utc).isoformat()
         for item in cancelled:
             if self.on_pending_event:
@@ -247,6 +255,7 @@ class AutomaticScanner:
                             high=bar.high, low=bar.low, symbol=symbol,
                             allow_targets=not filled_this_bar,
                         )
+                        trade_records = []
                         for event in trade_events:
                             record = {
                                 "symbol": symbol, "side": position.side.value,
@@ -254,20 +263,29 @@ class AutomaticScanner:
                                 "realized_pnl": position.realized_pnl,
                             }
                             runtime.closed_trade_events.append(record)
-                            if self.on_trade_event:
-                                self.on_trade_event(record)
-                        if trade_events:
-                            runtime.persist_demo_state()
+                            trade_records.append(record)
+                        cancelled_legs = []
                         if position.closed:
-                            self._cancel_remaining_pending(
+                            cancelled_legs = self._cancel_remaining_pending(
                                 symbol, close_time,
                                 "پوزیشن دمو بسته شد؛ لیمیت باقیمانده دیگر معتبر نیست",
+                                persist=False, notify=False,
                             )
                         elif any(event.get("type") in {"TP1", "TP2", "TP3"} for event in trade_events):
-                            self._cancel_remaining_pending(
+                            cancelled_legs = self._cancel_remaining_pending(
                                 symbol, close_time,
                                 "هدف سود فعال شد؛ ورود عمیق‌تر برای همین معامله لغو شد",
+                                persist=False, notify=False,
                             )
+                        # Persist exit accounting and cancellation of the deeper
+                        # entry leg in the same SQLite transaction before notifying.
+                        if trade_events or cancelled_legs:
+                            runtime.persist_demo_state()
+                        for record in trade_records:
+                            if self.on_trade_event:
+                                self.on_trade_event(record)
+                        if cancelled_legs:
+                            self._notify_pending_cancellations(symbol, close_time, cancelled_legs)
 
                     # Persist the candle cursor even when no pending event fired,
                     # so a restart cannot replay an already-managed OHLC range.
@@ -339,6 +357,7 @@ class AutomaticScanner:
                 events = runtime.account.process_candle(
                     high=bar.high, low=bar.low, symbol=position.symbol
                 )
+                trade_records = []
                 for event in events:
                     record = {
                         "symbol": position.symbol,
@@ -348,20 +367,28 @@ class AutomaticScanner:
                         "realized_pnl": position.realized_pnl,
                     }
                     runtime.closed_trade_events.append(record)
-                    if self.on_trade_event:
-                        self.on_trade_event(record)
-                if events:
-                    runtime.persist_demo_state()
+                    trade_records.append(record)
+                close_time = bar.timestamp + MS_15M
+                cancelled_legs = []
                 if position.closed:
-                    self._cancel_remaining_pending(
-                        position.symbol, bar.timestamp + MS_15M,
+                    cancelled_legs = self._cancel_remaining_pending(
+                        position.symbol, close_time,
                         "پوزیشن دمو بسته شد؛ لیمیت باقیمانده دیگر معتبر نیست",
+                        persist=False, notify=False,
                     )
                 elif any(event.get("type") in {"TP1", "TP2", "TP3"} for event in events):
-                    self._cancel_remaining_pending(
-                        position.symbol, bar.timestamp + MS_15M,
+                    cancelled_legs = self._cancel_remaining_pending(
+                        position.symbol, close_time,
                         "هدف سود فعال شد؛ ورود عمیق‌تر برای همین معامله لغو شد",
+                        persist=False, notify=False,
                     )
+                if events or cancelled_legs:
+                    runtime.persist_demo_state()
+                for record in trade_records:
+                    if self.on_trade_event:
+                        self.on_trade_event(record)
+                if cancelled_legs:
+                    self._notify_pending_cancellations(position.symbol, close_time, cancelled_legs)
             except Exception:
                 errors += 1
                 log.exception("Demo position management failed for %s", position.symbol)
