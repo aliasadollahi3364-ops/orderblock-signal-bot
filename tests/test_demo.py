@@ -25,8 +25,8 @@ def test_two_limit_fills_aggregate_with_weighted_average_and_half_margin():
 
     second = account.add_limit_fill("BTC/USDT", Side.LONG, 98.0, 95.0)
     assert second is first
-    assert second.entry == pytest.approx((100.0 * 0.125 + 90.0 * (12.5 / 98.0)) / (0.125 + 12.5 / 90.0))
-    assert second.quantity_initial == pytest.approx(0.125 + 12.5 / 90.0)
+    assert second.entry == pytest.approx((100.0 * 0.125 + 98.0 * (12.5 / 98.0)) / (0.125 + 12.5 / 98.0))
+    assert second.quantity_initial == pytest.approx(0.125 + 12.5 / 98.0)
     assert second.quantity_remaining == pytest.approx(second.quantity_initial)
     assert account.margin_used == pytest.approx(5.0)
     assert second.tp1 == pytest.approx(second.entry + (second.entry - 95.0))
