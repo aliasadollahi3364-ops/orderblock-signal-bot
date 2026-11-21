@@ -579,3 +579,76 @@ def test_first_limit_survives_bounce_before_deeper_second_limit_fills(monkeypatc
     assert fills[0]["average_entry"] == pytest.approx(104)
     assert fills[1]["average_entry"] == pytest.approx(position.entry)
     assert fills[1]["margin_allocated"] == pytest.approx(10.0)
+
+
+
+def test_short_first_limit_survives_rebound_before_deeper_second_limit_fills(monkeypatch):
+    """A short's deeper limit fills only on a later upward retest."""
+    from app.demo import DemoAccount
+    from app.pending_limits import PendingLimit, PendingLimitBook, PendingSetup, PendingStatus
+    from app.runtime import runtime
+    from app.scanner import AutomaticScanner, MS_15M
+
+    class HistoricalShortPullbackReplay:
+        rows = [
+            # Initial retest reaches only the nearer short limit at 104.
+            [10 * MS_15M, 103, 105, 102, 104, 120],
+            # Price moves down, then rebounds but remains below deeper limit 106.
+            [11 * MS_15M, 103, 105, 100, 101, 95],
+        ]
+
+        def fetch_ohlcv(self, symbol, timeframe, limit):
+            assert timeframe == "15m"
+            return list(self.rows)
+
+    market = HistoricalShortPullbackReplay()
+    account = DemoAccount(fee_rate=0)
+    book = PendingLimitBook()
+    setup = PendingSetup(
+        symbol="BTC/USDT", side="SELL", created_at=10 * MS_15M,
+        expires_after_bars=8, invalidation=111, stop=110,
+        ob_top=108, ob_bottom=102,
+        limits=[PendingLimit(1, 104), PendingLimit(2, 106)],
+    )
+    book.add(setup)
+
+    monkeypatch.setattr(runtime, "account", account)
+    monkeypatch.setattr(runtime, "pending_limits", book)
+    monkeypatch.setattr(runtime, "storage", None)
+    monkeypatch.setattr(runtime, "manual_symbols", [])
+    monkeypatch.setattr(runtime, "selected_symbols", [])
+    monkeypatch.setattr(runtime, "closed_trade_events", [])
+    monkeypatch.setattr("app.scanner.time.time", lambda: 12 * MS_15M / 1000)
+
+    events = []
+    scanner = AutomaticScanner(market, on_pending_event=events.append)
+
+    scanner.scan_once()
+    position = account.positions["BTC/USDT"]
+    assert len(position.legs) == 1
+    assert position.margin_allocated == pytest.approx(5.0)
+    assert setup.limits[0].status is PendingStatus.FILLED
+    assert setup.limits[1].status is PendingStatus.PENDING
+    assert position.closed is False
+    assert position.tp1_done is False
+    assert [event["leg"] for event in events if event["type"] == "LIMIT_FILLED"] == [1]
+
+    # A later upward retest reaches limit 2; both legs aggregate into one short.
+    market.rows.append([12 * MS_15M, 104, 107, 100, 105, 140])
+    monkeypatch.setattr("app.scanner.time.time", lambda: 13 * MS_15M / 1000)
+    scanner.scan_once()
+
+    position = account.positions["BTC/USDT"]
+    assert len(position.legs) == 2
+    assert position.side.value == "SHORT"
+    assert position.margin_allocated == pytest.approx(10.0)
+    assert account.margin_used == pytest.approx(10.0)
+    assert setup.limits[0].status is PendingStatus.FILLED
+    assert setup.limits[1].status is PendingStatus.FILLED
+    fills = [event for event in events if event["type"] == "LIMIT_FILLED"]
+    assert [event["leg"] for event in fills] == [1, 2]
+    assert fills[0]["price"] == pytest.approx(104)
+    assert fills[1]["price"] == pytest.approx(106)
+    assert fills[0]["average_entry"] == pytest.approx(104)
+    assert fills[1]["average_entry"] == pytest.approx(position.entry)
+    assert fills[1]["margin_allocated"] == pytest.approx(10.0)
