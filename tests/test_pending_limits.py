@@ -26,6 +26,32 @@ def test_two_limit_prices_are_staggered_and_direction_aware():
     assert len(set(buy)) == len(set(sell)) == 2
 
 
+def test_two_limit_prices_stay_on_pullback_side_of_signal_price():
+    # Long: both bids remain below breakout close, with leg 1 nearer.
+    near, deep = make_two_limit_prices("BUY", 110.0, 100.0, 106.0, reference_price=104.0)
+    assert 100.0 <= deep < near < 104.0
+
+    # Short: both asks remain above breakout close, with leg 1 nearer.
+    near, deep = make_two_limit_prices("SELL", 110.0, 100.0, 104.0, reference_price=102.0)
+    assert 102.0 < near < deep <= 110.0
+
+
+def test_two_limit_prices_reject_order_block_without_room_for_pullback():
+    with pytest.raises(ValueError, match="no room"):
+        make_two_limit_prices("BUY", 110.0, 100.0, 105.0, reference_price=99.0)
+    with pytest.raises(ValueError, match="no room"):
+        make_two_limit_prices("SELL", 110.0, 100.0, 105.0, reference_price=111.0)
+
+
+def test_limit_setup_requires_stop_behind_both_entries():
+    with pytest.raises(ValueError, match="BUY stop"):
+        PendingSetup("BTC/USDT", "BUY", 0, 8, 98.0, 101.0, 110.0, 100.0,
+                     [PendingLimit(1, 105.0), PendingLimit(2, 102.0)])
+    with pytest.raises(ValueError, match="SELL stop"):
+        PendingSetup("ETH/USDT", "SELL", 0, 8, 112.0, 109.0, 110.0, 100.0,
+                     [PendingLimit(1, 105.0), PendingLimit(2, 108.0)])
+
+
 def test_each_leg_fills_independently_only_when_its_price_is_touched():
     book = PendingLimitBook()
     book.add(setup())
