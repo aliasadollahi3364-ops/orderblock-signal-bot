@@ -114,7 +114,7 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
                     raise ValueError("سیگنال خط روند محدوده اردربلاک معتبر یا قیمت وزنی حجم ندارد.")
                 near, deep = make_two_limit_prices(
                     signal.side, signal.ob_top, signal.ob_bottom,
-                    signal.volume_weighted_price,
+                    signal.volume_weighted_price, reference_price=signal.entry,
                 )
                 created_at = signal.timestamp + 15 * 60 * 1000
                 current_position = runtime.account.positions.get(signal.symbol)
