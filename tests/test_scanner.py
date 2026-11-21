@@ -392,3 +392,58 @@ def test_two_limit_legs_can_fill_on_different_scans_and_different_candles(monkey
     assert fills[0]["margin_allocated"] == pytest.approx(5)
     assert fills[1]["average_entry"] == pytest.approx(position.entry)
     assert fills[1]["margin_allocated"] == pytest.approx(10)
+
+
+def test_exit_on_later_candle_without_pending_events_is_timestamped_and_notified(monkeypatch):
+    from app.demo import DemoAccount, Side
+    from app.pending_limits import PendingLimit, PendingLimitBook, PendingSetup, PendingStatus
+    from app.runtime import runtime
+    from app.scanner import AutomaticScanner
+
+    class OneCandleMarketData:
+        def fetch_ohlcv(self, symbol, timeframe, limit):
+            return [[900_000, 106.0, 111.0, 105.0, 110.0, 100.0]]
+
+    # Leg 1 filled previously; leg 2 remains pending and is not touched here.
+    book = PendingLimitBook()
+    setup = PendingSetup(
+        symbol="BTC/USDT", side="BUY", created_at=900_000,
+        expires_after_bars=8, invalidation=99.0, stop=98.0,
+        ob_top=106.0, ob_bottom=100.0,
+        limits=[
+            PendingLimit(1, 104.0, PendingStatus.FILLED, filled_at=900_000),
+            PendingLimit(2, 101.0),
+        ],
+        last_processed_bar=900_000,
+    )
+    book.add(setup)
+
+    account = DemoAccount(fee_rate=0)
+    account.add_limit_fill(
+        "BTC/USDT", Side.LONG, 104.0, 98.0,
+        opened_at="2026-01-01T00:15:00+00:00", leg_number=1,
+    )
+
+    # The next completed candle reaches TP1=110, but not pending limit 2=101.
+    monkeypatch.setattr("app.scanner.time.time", lambda: 1800.0)
+    monkeypatch.setattr(runtime, "account", account)
+    monkeypatch.setattr(runtime, "pending_limits", book)
+    monkeypatch.setattr(runtime, "manual_symbols", [])
+    monkeypatch.setattr(runtime, "selected_symbols", [])
+    monkeypatch.setattr(runtime, "storage", None)
+    monkeypatch.setattr(runtime, "closed_trade_events", [])
+
+    trade_events, pending_events = [], []
+    scanner = AutomaticScanner(
+        OneCandleMarketData(),
+        on_trade_event=trade_events.append,
+        on_pending_event=pending_events.append,
+    )
+    summary = scanner.scan_once()
+
+    assert summary.errors == 0
+    assert [event["type"] for event in trade_events] == ["TP1"]
+    assert trade_events[0]["time"] == "1970-01-01T00:30:00+00:00"
+    assert [event["type"] for event in pending_events] == ["LIMIT_CANCELLED"]
+    assert pending_events[0]["leg"] == 2
+    assert setup.limits[1].status is PendingStatus.CANCELLED
