@@ -90,3 +90,16 @@ def test_manual_cancel_only_cancels_still_pending_leg():
     book.process_candle("BTC/USDT", 900_000, 105, 103, 104)
     events = book.cancel("BTC/USDT", 1_000_000, "لغو دستی")
     assert [(e.leg_number, e.status) for e in events] == [(2, "CANCELLED")]
+
+
+
+def test_completed_setup_keeps_advancing_its_candle_cursor():
+    book = PendingLimitBook()
+    candidate = setup()
+    book.add(candidate)
+    book.process_candle("BTC/USDT", 900_000, 105, 103, 104)
+    book.process_candle("BTC/USDT", 1_800_000, 102, 100, 101)
+    assert candidate.active is False
+    assert candidate.last_processed_bar == 1_800_000
+    assert book.process_candle("BTC/USDT", 2_700_000, 105, 103, 104) == []
+    assert candidate.last_processed_bar == 2_700_000
