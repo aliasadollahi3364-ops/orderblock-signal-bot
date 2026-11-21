@@ -257,3 +257,100 @@ def test_stop_close_and_cancel_are_restored_atomically_after_restart(tmp_path):
 
 def test_tp3_close_and_cancel_are_restored_atomically_after_restart(tmp_path):
     _assert_closed_trade_snapshot_survives_restart(tmp_path, "TP3")
+
+
+def test_second_limit_fill_after_restart_restores_one_aggregated_position_and_alerts(tmp_path):
+    db_path = str(tmp_path / "second-leg-restart.sqlite3")
+    store = SQLiteStore(db_path)
+    account = DemoAccount(fee_rate=0)
+    book = PendingLimitBook()
+    setup = PendingSetup(
+        symbol="BTC/USDT", side="BUY", created_at=900_000,
+        expires_after_bars=8, invalidation=99, stop=98,
+        ob_top=106, ob_bottom=100,
+        limits=[PendingLimit(1, 104), PendingLimit(2, 101)],
+    )
+    book.add(setup)
+    runtime_before = BotRuntime(account=account, storage=store, pending_limits=book)
+    store.save_pending_setups(book)
+
+    first_events = book.process_candle("BTC/USDT", 1_800_000, 105, 103, 104)
+    assert [(e.leg_number, e.status) for e in first_events] == [(1, "FILLED")]
+    first_position = account.add_limit_fill(
+        "BTC/USDT", Side.LONG, 104, 98,
+        opened_at="1970-01-01T00:30:00+00:00", leg_number=1,
+    )
+    first_alert = {
+        "symbol": "BTC/USDT", "side": "LONG", "type": "LIMIT_FILLED",
+        "leg": 1, "price": 104, "time": "1970-01-01T00:30:00+00:00",
+        "average_entry": first_position.entry, "margin_allocated": 5,
+        "tp1": first_position.tp1, "tp2": first_position.tp2,
+        "tp3": first_position.tp3, "realized_pnl": first_position.realized_pnl,
+    }
+    runtime_before.closed_trade_events.append(first_alert)
+    runtime_before.persist_demo_state()
+
+    # Simulate process death: recover the account, pending book, cursor and alert queue.
+    restarted_store = SQLiteStore(db_path)
+    restored_account, restored_history = restarted_store.load_state(DemoAccount())
+    restored_book = restarted_store.load_pending_setups()
+    restored_runtime = BotRuntime(
+        account=restored_account, storage=restarted_store,
+        pending_limits=restored_book, closed_trade_events=restored_history,
+    )
+    restored_setup = restored_book.setups["BTC/USDT"]
+    assert restored_setup.last_processed_bar == 1_800_000
+    assert restored_setup.limits[0].status is PendingStatus.FILLED
+    assert restored_setup.limits[1].status is PendingStatus.PENDING
+    assert restored_account.margin_used == pytest.approx(5)
+    assert len(restored_account.positions["BTC/USDT"].legs) == 1
+
+    # The next closed candle fills only the deeper second limit after restart.
+    second_events = restored_book.process_candle(
+        "BTC/USDT", 2_700_000, 102, 100.5, 101.5,
+    )
+    assert [(e.leg_number, e.status) for e in second_events] == [(2, "FILLED")]
+    second_position = restored_account.add_limit_fill(
+        "BTC/USDT", Side.LONG, 101, 98,
+        opened_at="1970-01-01T00:45:00+00:00", leg_number=2,
+    )
+    second_alert = {
+        "symbol": "BTC/USDT", "side": "LONG", "type": "LIMIT_FILLED",
+        "leg": 2, "price": 101, "time": "1970-01-01T00:45:00+00:00",
+        "average_entry": second_position.entry, "margin_allocated": 10,
+        "tp1": second_position.tp1, "tp2": second_position.tp2,
+        "tp3": second_position.tp3, "realized_pnl": second_position.realized_pnl,
+    }
+    restored_runtime.closed_trade_events.append(second_alert)
+    restored_runtime.persist_demo_state()
+
+    # A second restart must recover both legs as one position with the weighted entry.
+    final_store = SQLiteStore(db_path)
+    final_account, final_history = final_store.load_state(DemoAccount())
+    final_book = final_store.load_pending_setups()
+    final_position = final_account.positions["BTC/USDT"]
+    expected_entry = ((25 / 104) * 104 + (25 / 101) * 101) / ((25 / 104) + (25 / 101))
+    assert len(final_account.positions) == 1
+    assert len(final_position.legs) == 2
+    assert [leg["number"] for leg in final_position.legs] == [1, 2]
+    assert final_position.entry == pytest.approx(expected_entry)
+    assert final_position.margin_allocated == pytest.approx(10)
+    assert final_account.margin_used == pytest.approx(10)
+    assert final_account.free_margin == pytest.approx(90)
+    assert final_position.closed is False
+    assert [leg.status for leg in final_book.setups["BTC/USDT"].limits] == [
+        PendingStatus.FILLED, PendingStatus.FILLED,
+    ]
+    assert final_book.setups["BTC/USDT"].last_processed_bar == 2_700_000
+    assert [event["leg"] for event in final_history if event.get("type") == "LIMIT_FILLED"] == [1, 2]
+    queued = final_store.load_notification_outbox()
+    assert [item["event"]["leg"] for item in queued if item["event"]["type"] == "LIMIT_FILLED"] == [1, 2]
+
+    # Replaying the already-processed candle or persisting the same snapshot is idempotent.
+    assert final_book.process_candle("BTC/USDT", 2_700_000, 102, 100.5, 101.5) == []
+    restored_runtime_again = BotRuntime(
+        account=final_account, storage=final_store,
+        pending_limits=final_book, closed_trade_events=final_history,
+    )
+    restored_runtime_again.persist_demo_state()
+    assert len(final_store.load_notification_outbox()) == 2
