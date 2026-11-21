@@ -310,9 +310,9 @@ class OrderBlockStrategy:
         bullish_recent = self._bullish_divergence_bar is not None and bar_index - self._bullish_divergence_bar <= lookback
         bearish_recent = self._bearish_divergence_bar is not None and bar_index - self._bearish_divergence_bar <= lookback
         if side == "BUY":
-            state = "BULLISH" if bullish_recent else "BEARISH" if bearish_recent else "NONE"
+            state = "BULLISH" if bullish_recent else "OPPOSING_BEARISH" if bearish_recent else "NONE"
         else:
-            state = "BEARISH" if bearish_recent else "BULLISH" if bullish_recent else "NONE"
+            state = "BEARISH" if bearish_recent else "OPPOSING_BULLISH" if bullish_recent else "NONE"
         value = self._rsi_values[bar_index] if bar_index < len(self._rsi_values) else None
         return state, value
 
@@ -323,7 +323,7 @@ class OrderBlockStrategy:
         previous_close = bars[-1].close if bars else None
         bars.append(candle)
         idx = len(bars)-1
-        current_rsi = self._update_rsi(candle.close)
+        self._update_rsi(candle.close)
         self._tr15.append(_tr(candle, previous_close))
         atr = _atr(self._tr15, self.cfg.atr_len)
         candidate = idx-self.cfg.pivot15
