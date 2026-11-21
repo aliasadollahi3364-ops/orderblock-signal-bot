@@ -536,6 +536,20 @@ async def reset_strategy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await _reply_temporary(update, context, "تنظیمات استراتژی به پیش‌فرض کد بازگشت و ذخیره شد.")
 
 
+async def gold_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    service = runtime.gold_market
+    if service is None:
+        await _reply_temporary(
+            update, context,
+            "🥇 تحلیل طلای ۱۸ عیار هنوز فعال نیست. برای فعال‌سازی، کلید رایگان طلاسنج را با نام TALASANJ_API_KEY در متغیرهای خصوصی HOKAS ثبت کن.\n"
+            "دریافت کلید: @taalasanj_bot ← API برنامه‌نویسان. کلید را در چت ارسال نکن."
+        )
+        return
+    await _reply_temporary(update, context, service.status_text())
+
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized(update, context):
         return
@@ -557,7 +571,7 @@ def build_telegram_application(token: str, allowed_chat_id: str) -> Application:
     application = ApplicationBuilder().token(token).build()
     application.bot_data["allowed_chat_id"] = allowed_chat_id
     for command, callback in (
-        ("start", start), ("menu", menu), ("status", status), ("demo", demo),
+        ("start", start), ("menu", menu), ("status", status), ("gold", gold_status), ("demo", demo),
         ("open", open_positions), ("panel", demo_panel), ("history", trade_history), ("pairs", pairs), ("add", add_pair), ("remove", remove_pair), ("auto_pairs", auto_pairs), ("stats", stats), ("strategy", strategy),
         ("set", set_strategy_value), ("enable", enable_strategy), ("disable", disable_strategy), ("reset_strategy", reset_strategy), ("help", help_command),
     ):
