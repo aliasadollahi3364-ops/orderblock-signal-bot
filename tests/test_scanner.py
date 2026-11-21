@@ -122,3 +122,45 @@ def test_scanner_replays_missed_candles_and_fills_both_limit_legs(monkeypatch):
     scanner.scan_once()
     assert len([event for event in pending_events if event["type"] == "LIMIT_FILLED"]) == 2
     assert account.balance == pytest.approx(balance_after_first_scan)
+
+
+
+def test_scanner_reports_each_pending_leg_cancelled_on_structural_invalidation(monkeypatch):
+    from app.demo import DemoAccount
+    from app.pending_limits import PendingLimit, PendingLimitBook, PendingSetup
+    from app.runtime import runtime
+    from app.scanner import AutomaticScanner, MS_15M
+
+    class InvalidatingMarketData:
+        def fetch_ohlcv(self, symbol, timeframe, limit):
+            return [[
+                10 * MS_15M, 103, 105, 97, 100, 10,
+            ]]
+
+    book = PendingLimitBook()
+    candidate = PendingSetup(
+        symbol="BTC/USDT", side="BUY", created_at=10 * MS_15M,
+        expires_after_bars=8, invalidation=99, stop=98,
+        ob_top=106, ob_bottom=100,
+        limits=[PendingLimit(1, 104), PendingLimit(2, 101)],
+    )
+    book.add(candidate)
+    account = DemoAccount(fee_rate=0)
+    monkeypatch.setattr(runtime, "account", account)
+    monkeypatch.setattr(runtime, "pending_limits", book)
+    monkeypatch.setattr(runtime, "storage", None)
+    monkeypatch.setattr(runtime, "manual_symbols", [])
+    monkeypatch.setattr(runtime, "selected_symbols", [])
+    monkeypatch.setattr(runtime, "closed_trade_events", [])
+    monkeypatch.setattr("app.scanner.time.time", lambda: 12 * MS_15M / 1000)
+
+    events = []
+    AutomaticScanner(
+        InvalidatingMarketData(), on_pending_event=events.append,
+    ).scan_once()
+
+    assert [(event["type"], event["leg"]) for event in events] == [
+        ("LIMIT_CANCELLED", 1), ("LIMIT_CANCELLED", 2)
+    ]
+    assert all("بی‌اعتبار" in event["reason"] for event in events)
+    assert account.open_positions == []
