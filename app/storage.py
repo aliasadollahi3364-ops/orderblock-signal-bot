@@ -156,8 +156,11 @@ class SQLiteStore:
 
             # Enqueue trade lifecycle events in the same SQLite transaction
             # as the account snapshot. Hashes make repeated snapshots idempotent.
-            old_event_ids = {
-                hashlib.sha256(row["payload"].encode("utf-8")).hexdigest()
+            old_event_signatures = {
+                hashlib.sha256(json.dumps(
+                    json.loads(row["payload"]), sort_keys=True,
+                    separators=(",", ":"), default=str,
+                ).encode("utf-8")).hexdigest()
                 for row in db.execute("SELECT payload FROM demo_events")
             }
             notify_types = {
@@ -167,6 +170,11 @@ class SQLiteStore:
             for event in events:
                 if event.get("type") not in notify_types:
                     continue
+                signature = hashlib.sha256(json.dumps(
+                    event, sort_keys=True, separators=(",", ":"), default=str,
+                ).encode("utf-8")).hexdigest()
+                if signature in old_event_signatures:
+                    continue  # Do not replay pre-outbox history after migration.
                 payload = json.dumps(
                     {"kind": "trade", "event": event},
                     sort_keys=True, separators=(",", ":"), default=str,
