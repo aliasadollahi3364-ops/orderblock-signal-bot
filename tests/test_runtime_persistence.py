@@ -354,3 +354,111 @@ def test_second_limit_fill_after_restart_restores_one_aggregated_position_and_al
     )
     restored_runtime_again.persist_demo_state()
     assert len(final_store.load_notification_outbox()) == 2
+
+
+def _assert_two_filled_legs_exit_survives_restart(tmp_path, exit_kind):
+    db_path = str(tmp_path / f"two-leg-{exit_kind.lower()}.sqlite3")
+    store = SQLiteStore(db_path)
+    account = DemoAccount(fee_rate=0)
+    book = PendingLimitBook()
+    setup = PendingSetup(
+        symbol="BTC/USDT", side="BUY", created_at=900_000,
+        expires_after_bars=8, invalidation=99, stop=98,
+        ob_top=106, ob_bottom=100,
+        limits=[
+            PendingLimit(1, 104, PendingStatus.FILLED, filled_at=1_800_000),
+            PendingLimit(2, 101, PendingStatus.FILLED, filled_at=2_700_000),
+        ],
+        last_processed_bar=2_700_000,
+    )
+    book.add(setup)
+    position = account.add_limit_fill(
+        "BTC/USDT", Side.LONG, 104, 98,
+        opened_at="1970-01-01T00:30:00+00:00", leg_number=1,
+    )
+    position = account.add_limit_fill(
+        "BTC/USDT", Side.LONG, 101, 98,
+        opened_at="1970-01-01T00:45:00+00:00", leg_number=2,
+    )
+    events = [
+        {
+            "symbol": "BTC/USDT", "side": "LONG", "type": "LIMIT_FILLED",
+            "leg": 1, "price": 104, "time": "1970-01-01T00:30:00+00:00",
+            "average_entry": 104, "margin_allocated": 5,
+            "tp1": 106, "tp2": 108, "tp3": 110, "realized_pnl": 0.0,
+        },
+        {
+            "symbol": "BTC/USDT", "side": "LONG", "type": "LIMIT_FILLED",
+            "leg": 2, "price": 101, "time": "1970-01-01T00:45:00+00:00",
+            "average_entry": position.entry, "margin_allocated": 10,
+            "tp1": position.tp1, "tp2": position.tp2, "tp3": position.tp3,
+            "realized_pnl": 0.0,
+        },
+    ]
+    store.save_runtime_state(account, events, book)
+
+    # Restart with both legs filled and the aggregate position fully restored.
+    restarted_store = SQLiteStore(db_path)
+    restored_account, restored_events = restarted_store.load_state(DemoAccount())
+    restored_book = restarted_store.load_pending_setups()
+    restored = restored_account.positions["BTC/USDT"]
+    assert len(restored.legs) == 2
+    assert restored.margin_allocated == pytest.approx(10)
+    assert restored_account.margin_used == pytest.approx(10)
+    assert [leg.status for leg in restored_book.setups["BTC/USDT"].limits] == [
+        PendingStatus.FILLED, PendingStatus.FILLED,
+    ]
+
+    if exit_kind == "STOP":
+        high, low = 105, 97
+        expected = ["STOP"]
+    elif exit_kind == "TP3":
+        high, low = restored.tp3 + 1, restored.entry + 0.1
+        expected = ["TP1", "TP2", "TP3"]
+    else:
+        raise AssertionError(f"Unexpected exit kind: {exit_kind}")
+
+    exit_events = restored_account.process_candle(
+        high=high, low=low, symbol="BTC/USDT",
+    )
+    assert [event["type"] for event in exit_events] == expected
+    assert restored.closed is True
+    assert restored.quantity_remaining == pytest.approx(0)
+    assert restored_account.margin_used == pytest.approx(0)
+
+    for event in exit_events:
+        restored_events.append({
+            "symbol": "BTC/USDT", "side": "LONG", **event,
+            "time": "1970-01-01T01:00:00+00:00",
+            "realized_pnl": restored.realized_pnl,
+        })
+    restarted_store.save_runtime_state(restored_account, restored_events, restored_book)
+
+    final_store = SQLiteStore(db_path)
+    final_account, final_events = final_store.load_state(DemoAccount())
+    final_book = final_store.load_pending_setups()
+    final_position = final_account.positions["BTC/USDT"]
+    assert final_position.closed is True
+    assert final_position.quantity_remaining == pytest.approx(0)
+    assert final_position.margin_allocated == pytest.approx(10)
+    assert final_account.margin_used == pytest.approx(0)
+    assert final_account.balance == pytest.approx(restored_account.balance)
+    assert final_position.realized_pnl == pytest.approx(restored.realized_pnl)
+    assert len(final_position.legs) == 2
+    assert [leg.status for leg in final_book.setups["BTC/USDT"].limits] == [
+        PendingStatus.FILLED, PendingStatus.FILLED,
+    ]
+    assert [e["type"] for e in final_events if e["type"] in {"STOP", "TP1", "TP2", "TP3"}][-len(expected):] == expected
+
+    outbox = final_store.load_notification_outbox()
+    assert [item["event"]["type"] for item in outbox] == ["LIMIT_FILLED", "LIMIT_FILLED"] + expected
+    final_store.save_runtime_state(final_account, final_events, final_book)
+    assert len(final_store.load_notification_outbox()) == len(outbox)
+
+
+def test_stop_after_both_limit_fills_survives_restart_atomically(tmp_path):
+    _assert_two_filled_legs_exit_survives_restart(tmp_path, "STOP")
+
+
+def test_tp3_after_both_limit_fills_survives_restart_atomically(tmp_path):
+    _assert_two_filled_legs_exit_survives_restart(tmp_path, "TP3")
