@@ -39,21 +39,24 @@ class BotRuntime:
         if self.storage is None:
             return
         # A FILLED marker must never reach disk before its matching demo ledger
-        # leg exists. Otherwise a crash between the two writes loses the entry.
+        # leg exists. Match number and entry price to avoid confusing a new setup
+        # with an older, already-closed position for the same symbol.
         for symbol, setup in self.pending_limits.setups.items():
-            filled_numbers = {
-                leg.number for leg in setup.limits
-                if leg.status is PendingStatus.FILLED
-            }
-            if not filled_numbers:
+            filled_legs = [leg for leg in setup.limits if leg.status is PendingStatus.FILLED]
+            if not filled_legs:
                 continue
             position = self.account.positions.get(symbol)
-            persisted_numbers = {
-                int(leg.get("number", -1)) for leg in (position.legs if position else [])
-            }
-            if not filled_numbers.issubset(persisted_numbers):
-                # The following persist_demo_state() call commits both snapshots.
-                return
+            persisted_legs = position.legs if position else []
+            for pending_leg in filled_legs:
+                matching = any(
+                    int(leg.get("number", -1)) == pending_leg.number
+                    and abs(float(leg.get("entry", 0.0)) - pending_leg.price)
+                    <= max(abs(pending_leg.price), 1.0) * 1e-10
+                    for leg in persisted_legs
+                )
+                if not matching:
+                    # The following persist_demo_state() call commits both snapshots.
+                    return
         save_snapshot = getattr(self.storage, "save_runtime_state", None)
         if save_snapshot is not None:
             save_snapshot(self.account, self.closed_trade_events, self.pending_limits)
