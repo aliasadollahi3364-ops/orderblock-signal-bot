@@ -26,8 +26,28 @@ class BotRuntime:
     gold_market: Any = None
     pending_limits: PendingLimitBook = field(default_factory=PendingLimitBook)
 
+    def _pending_fills_reconciled(self) -> bool:
+        # A candle can fill both limits at once. The book marks both FILLED
+        # before the scanner books each demo leg, so never persist a partial
+        # account snapshot against a book that already records both fills.
+        for symbol, setup in self.pending_limits.setups.items():
+            position = self.account.positions.get(symbol)
+            persisted_legs = position.legs if position else []
+            for pending_leg in setup.limits:
+                if pending_leg.status is not PendingStatus.FILLED:
+                    continue
+                matching = any(
+                    int(leg.get("number", -1)) == pending_leg.number
+                    and abs(float(leg.get("entry", 0.0)) - pending_leg.price)
+                    <= max(abs(pending_leg.price), 1.0) * 1e-10
+                    for leg in persisted_legs
+                )
+                if not matching:
+                    return False
+        return True
+
     def persist_demo_state(self) -> None:
-        if self.storage is None:
+        if self.storage is None or not self._pending_fills_reconciled():
             return
         save_snapshot = getattr(self.storage, "save_runtime_state", None)
         if save_snapshot is not None:
@@ -36,27 +56,10 @@ class BotRuntime:
             self.storage.save_state(self.account, self.closed_trade_events)
 
     def persist_pending_limits(self) -> None:
-        if self.storage is None:
+        if self.storage is None or not self._pending_fills_reconciled():
+            # Do not commit a FILLED marker until every corresponding demo leg
+            # has been booked. The next successful snapshot writes both tables.
             return
-        # A FILLED marker must never reach disk before its matching demo ledger
-        # leg exists. Match number and entry price to avoid confusing a new setup
-        # with an older, already-closed position for the same symbol.
-        for symbol, setup in self.pending_limits.setups.items():
-            filled_legs = [leg for leg in setup.limits if leg.status is PendingStatus.FILLED]
-            if not filled_legs:
-                continue
-            position = self.account.positions.get(symbol)
-            persisted_legs = position.legs if position else []
-            for pending_leg in filled_legs:
-                matching = any(
-                    int(leg.get("number", -1)) == pending_leg.number
-                    and abs(float(leg.get("entry", 0.0)) - pending_leg.price)
-                    <= max(abs(pending_leg.price), 1.0) * 1e-10
-                    for leg in persisted_legs
-                )
-                if not matching:
-                    # The following persist_demo_state() call commits both snapshots.
-                    return
         save_snapshot = getattr(self.storage, "save_runtime_state", None)
         if save_snapshot is not None:
             save_snapshot(self.account, self.closed_trade_events, self.pending_limits)
