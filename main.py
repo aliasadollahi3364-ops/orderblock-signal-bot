@@ -59,7 +59,11 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
             caption = (
                 f"📣 سیگنال جدید دمو | {signal.symbol}\nروش ورود: {method}\n"
                 "تایم‌فریم صدور سیگنال: ۱۵ دقیقه | روند و محدوده مرجع: اردربلاک ۴ ساعته\n"
-                f"جهت: {signal.side}\nورود: {signal.entry:g}\nحد ضرر: {signal.stop:g}\n"
+                f"جهت: {signal.side}\n"
+                f"واگرایی RSI: {signal.rsi_divergence}"
+                + (f" | RSI: {signal.rsi_value:.1f}" if signal.rsi_value is not None else "")
+                + "\\n"
+                f"ورود: {signal.entry:g}\nحد ضرر: {signal.stop:g}\n"
                 f"TP1: {position.tp1:g}\nTP2: {position.tp2:g}\nTP3: {position.tp3:g}\n"
                 f"زمان ورود: {entry_time}\n"
                 "زمان خروج: پس از برخورد به حد ضرر یا اهداف، در پیام رویداد ثبت می‌شود.\n"
@@ -131,9 +135,18 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
                 t1, t2, t3 = targets(near)
                 u1, u2, u3 = targets(deep)
                 entry_time = datetime.fromtimestamp(created_at / 1000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+                rsi_label = {
+                    "BULLISH": "واگرایی هم‌جهت صعودی؛ تأیید RSI",
+                    "BEARISH": "واگرایی هم‌جهت نزولی؛ تأیید RSI",
+                    "NONE": "واگرایی معتبر مشاهده نشد؛ سیگنال طبق شروط اصلی مجاز است",
+                    "DISABLED": "فیلتر واگرایی RSI خاموش است",
+                }.get(signal.rsi_divergence, "وضعیت واگرایی RSI نامشخص")
                 alert = (
                     f"🚨 هشدار زودهنگام شکست خط روند + تأیید اردربلاک | {signal.symbol}\n"
                     f"جهت: {signal.side} | تایم‌فریم: ۱۵ دقیقه\n"
+                    f"واگرایی RSI: {rsi_label}"
+                    + (f" | RSI: {signal.rsi_value:.1f}" if signal.rsi_value is not None else "")
+                    + "\\n"
                     f"لیمیت ۱ (نزدیک‌تر): {near:g} | TP1: {t1:g} | TP2: {t2:g} | TP3: {t3:g}\n"
                     f"لیمیت ۲ (عمیق‌تر): {deep:g} | TP1: {u1:g} | TP2: {u2:g} | TP3: {u3:g}\n"
                     f"حد ضرر ساختاری: {signal.stop:g}\n"
