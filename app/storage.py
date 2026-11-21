@@ -1,6 +1,7 @@
 """Atomic SQLite persistence for the internal demo account."""
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from contextlib import contextmanager
@@ -73,6 +74,18 @@ class SQLiteStore:
                     payload TEXT NOT NULL
                 )
             """)
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS notification_outbox (
+                    event_id TEXT PRIMARY KEY,
+                    payload TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    delivered_at TEXT
+                )
+            """)
+            db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_notification_outbox_pending
+                ON notification_outbox(delivered_at, created_at)
+            """)
 
     @staticmethod
     def _position_payload(position: DemoPosition) -> dict[str, Any]:
@@ -140,11 +153,89 @@ class SQLiteStore:
         """Atomically persist fills, positions, replay cursor and pending-leg states."""
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
+
+            # Enqueue trade lifecycle events in the same SQLite transaction
+            # as the account snapshot. Hashes make repeated snapshots idempotent.
+            old_event_ids = {
+                hashlib.sha256(row["payload"].encode("utf-8")).hexdigest()
+                for row in db.execute("SELECT payload FROM demo_events")
+            }
+            notify_types = {
+                "LIMIT_FILLED", "TP1", "TP2", "TP3", "STOP",
+                "BREAK_EVEN_STOP", "TP1_TRAILING_STOP",
+            }
+            for event in events:
+                if event.get("type") not in notify_types:
+                    continue
+                payload = json.dumps(
+                    {"kind": "trade", "event": event},
+                    sort_keys=True, separators=(",", ":"), default=str,
+                )
+                event_id = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+                db.execute(
+                    "INSERT OR IGNORE INTO notification_outbox"
+                    "(event_id, payload, created_at) VALUES (?, ?, ?)",
+                    (event_id, payload, str(event.get("time", ""))),
+                )
+
+            old_pending = {}
+            for row in db.execute("SELECT symbol, payload FROM pending_setups"):
+                old_data = json.loads(row["payload"])
+                for leg in old_data.get("limits", []):
+                    old_pending[(row["symbol"], int(leg["number"]))] = leg.get("status")
+
+            new_pending_rows = self._pending_rows(book)
+            for symbol, raw_payload in new_pending_rows:
+                setup_data = json.loads(raw_payload)
+                for leg in setup_data.get("limits", []):
+                    key = (symbol, int(leg["number"]))
+                    if leg.get("status") != PendingStatus.CANCELLED.value:
+                        continue
+                    if old_pending.get(key) == PendingStatus.CANCELLED.value:
+                        continue
+                    event = {
+                        "symbol": symbol, "side": setup_data.get("side"),
+                        "type": "LIMIT_CANCELLED", "leg": leg["number"],
+                        "price": leg["price"],
+                        "time": leg.get("cancelled_at") or setup_data.get("created_at"),
+                        "reason": leg.get("cancel_reason") or "نامشخص",
+                    }
+                    payload = json.dumps(
+                        {"kind": "pending", "event": event},
+                        sort_keys=True, separators=(",", ":"), default=str,
+                    )
+                    event_id = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+                    db.execute(
+                        "INSERT OR IGNORE INTO notification_outbox"
+                        "(event_id, payload, created_at) VALUES (?, ?, ?)",
+                        (event_id, payload, str(event.get("time", ""))),
+                    )
+
             self._write_account(db, account, events)
             db.execute("DELETE FROM pending_setups")
             db.executemany(
                 "INSERT INTO pending_setups(symbol, payload) VALUES (?, ?)",
-                self._pending_rows(book),
+                new_pending_rows,
+            )
+
+    def load_notification_outbox(self, limit: int = 50) -> list[dict[str, Any]]:
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT event_id, payload FROM notification_outbox "
+                "WHERE delivered_at IS NULL ORDER BY created_at, event_id LIMIT ?",
+                (max(1, min(int(limit), 500)),),
+            ).fetchall()
+            return [
+                {"event_id": row["event_id"], **json.loads(row["payload"])}
+                for row in rows
+            ]
+
+    def mark_notification_delivered(self, event_id: str, delivered_at: str) -> None:
+        with self._connect() as db:
+            db.execute(
+                "UPDATE notification_outbox SET delivered_at=? "
+                "WHERE event_id=? AND delivered_at IS NULL",
+                (delivered_at, event_id),
             )
 
     def save_manual_symbols(self, symbols: list[str]) -> None:
