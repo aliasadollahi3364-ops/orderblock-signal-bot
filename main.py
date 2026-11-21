@@ -209,29 +209,35 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
             return
         while True:
             try:
-                queued = await asyncio.to_thread(store.load_notification_outbox, 50)
+                queued = await asyncio.to_thread(runtime.storage.load_notification_outbox, 50)
                 for item in queued:
                     event = item["event"]
                     kind = item["kind"]
                     event_type = str(event.get("type", ""))
+                    raw_event_time = event.get("time", "نامشخص")
+                    event_time_text = (
+                        datetime.fromtimestamp(raw_event_time / 1000, timezone.utc).isoformat()
+                        if isinstance(raw_event_time, (int, float))
+                        else str(raw_event_time)
+                    )
                     if kind == "pending" or event_type == "LIMIT_CANCELLED":
                         message = (
-                            f"❌ لیمیت شماره {event['leg']} لغو شد | {event['symbol']}\\n"
-                            f"جهت: {event.get('side', 'نامشخص')}\\n"
-                            f"قیمت سفارش: {float(event['price']):g}\\n"
-                            f"زمان: {event.get('time', 'نامشخص')}\\n"
-                            f"علت لغو: {event.get('reason', 'نامشخص')}\\n"
+                            f"❌ لیمیت شماره {event['leg']} لغو شد | {event['symbol']}\n"
+                            f"جهت: {event.get('side', 'نامشخص')}\n"
+                            f"قیمت سفارش: {float(event['price']):g}\n"
+                            f"زمان: {event_time_text}\n"
+                            f"علت لغو: {event.get('reason', 'نامشخص')}\n"
                             "حساب دمو؛ معاملات واقعی خاموش"
                         )
                     elif event_type == "LIMIT_FILLED":
                         message = (
-                            f"✅ لیمیت شماره {event['leg']} پر شد | {event['symbol']}\\n"
-                            f"جهت: {event['side']}\\n"
-                            f"قیمت پرشدن این لیمیت: {float(event['price']):g}\\n"
-                            f"میانگین ورود پوزیشن واحد: {float(event['average_entry']):g}\\n"
-                            f"مارجین استفاده‌شده: {float(event['margin_allocated']):g} دلار\\n"
-                            f"اهداف مشترک: TP1 {float(event['tp1']):g} | TP2 {float(event['tp2']):g} | TP3 {float(event['tp3']):g}\\n"
-                            f"زمان: {event.get('time', 'نامشخص')}\\nحساب دمو؛ معاملات واقعی خاموش"
+                            f"✅ لیمیت شماره {event['leg']} پر شد | {event['symbol']}\n"
+                            f"جهت: {event['side']}\n"
+                            f"قیمت پرشدن این لیمیت: {float(event['price']):g}\n"
+                            f"میانگین ورود پوزیشن واحد: {float(event['average_entry']):g}\n"
+                            f"مارجین استفاده‌شده: {float(event['margin_allocated']):g} دلار\n"
+                            f"اهداف مشترک: TP1 {float(event['tp1']):g} | TP2 {float(event['tp2']):g} | TP3 {float(event['tp3']):g}\n"
+                            f"زمان: {event_time_text}\nحساب دمو؛ معاملات واقعی خاموش"
                         )
                     else:
                         labels = {
@@ -244,11 +250,11 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
                         }
                         label = labels.get(event_type, f"رویداد معامله: {event_type}")
                         message = (
-                            f"{label} | {event['symbol']}\\n"
-                            f"جهت: {event.get('side', 'نامشخص')}\\n"
-                            f"قیمت رویداد: {float(event['price']):g}\\n"
-                            f"زمان: {event.get('time', 'نامشخص')}\\n"
-                            f"سود/زیان تحقق‌یافته تا این لحظه: {float(event.get('realized_pnl', 0.0)):+.4f} USDT\\n"
+                            f"{label} | {event['symbol']}\n"
+                            f"جهت: {event.get('side', 'نامشخص')}\n"
+                            f"قیمت رویداد: {float(event['price']):g}\n"
+                            f"زمان: {event_time_text}\n"
+                            f"سود/زیان تحقق‌یافته تا این لحظه: {float(event.get('realized_pnl', 0.0)):+.4f} USDT\n"
                             "حساب دمو | معاملات واقعی: خاموش"
                         )
                     try:
@@ -260,7 +266,7 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
                     # tiny send/mark window can cause a retry; Telegram offers
                     # no idempotency key for sendMessage, so delivery is at-least-once.
                     await asyncio.to_thread(
-                        store.mark_notification_delivered,
+                        runtime.storage.mark_notification_delivered,
                         item["event_id"],
                         datetime.now(timezone.utc).isoformat(),
                     )
