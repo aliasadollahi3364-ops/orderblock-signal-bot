@@ -208,7 +208,13 @@ class DemoAccount:
             price = pos.stop
             self._close_fraction(pos, 1.0, price)
             pos.closed = True
-            events.append({"type": "STOP", "price": price})
+            if pos.tp2_done:
+                stop_event = "TP1_TRAILING_STOP"
+            elif pos.tp1_done and abs(pos.stop - pos.entry) <= max(pos.entry, 1.0) * 1e-10:
+                stop_event = "BREAK_EVEN_STOP"
+            else:
+                stop_event = "STOP"
+            events.append({"type": stop_event, "price": price})
             return events
 
         def target_hit(target: float) -> bool:
