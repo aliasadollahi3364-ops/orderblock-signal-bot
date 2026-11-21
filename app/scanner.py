@@ -122,6 +122,23 @@ class AutomaticScanner:
         self._last_signal_bar: dict[str, int] = {}
         self._selected: list[str] = []
 
+    def _cancel_pending_after_position_close(self, symbol: str, timestamp: int) -> None:
+        cancelled = runtime.pending_limits.cancel(
+            symbol, timestamp, "پوزیشن دمو بسته شد؛ لیمیت باقیمانده دیگر معتبر نیست"
+        )
+        if not cancelled:
+            return
+        runtime.persist_pending_limits()
+        event_time = datetime.fromtimestamp(timestamp / 1000, timezone.utc).isoformat()
+        for item in cancelled:
+            if self.on_pending_event:
+                self.on_pending_event({
+                    "symbol": symbol, "side": item.side,
+                    "type": "LIMIT_CANCELLED", "leg": item.leg_number,
+                    "price": item.price, "time": event_time,
+                    "reason": item.reason,
+                })
+
     def scan_once(self) -> ScanSummary:
         runtime.scanner_state = "SCANNING_MARKETS"
         runtime.last_scan_at = datetime.now(timezone.utc)
@@ -228,6 +245,10 @@ class AutomaticScanner:
                             if self.on_trade_event:
                                 self.on_trade_event(record)
                         runtime.persist_demo_state()
+                        if position.closed:
+                            self._cancel_pending_after_position_close(
+                                symbol, bar.timestamp + MS_15M
+                            )
                     self._last_demo_bar[symbol] = bar.timestamp
             except Exception:
                 errors += 1
@@ -308,6 +329,10 @@ class AutomaticScanner:
                         self.on_trade_event(record)
                 if events:
                     runtime.persist_demo_state()
+                if position.closed:
+                    self._cancel_pending_after_position_close(
+                        position.symbol, bar.timestamp + MS_15M
+                    )
             except Exception:
                 errors += 1
                 log.exception("Demo position management failed for %s", position.symbol)
