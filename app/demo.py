@@ -109,14 +109,14 @@ class DemoAccount:
         return position
 
     def add_limit_fill(self, symbol: str, side: Side, entry: float, stop: float, opened_at: str | None = None, leg_number: int = 1) -> DemoPosition:
-        """Add one half-size simulated limit fill to an aggregated position."""
+        """Add one configured-margin simulated fill to a single aggregated position."""
         if entry <= 0 or stop <= 0:
             raise ValueError("Entry and stop must be positive.")
         if side is Side.LONG and stop >= entry:
             raise ValueError("Long stop must be below entry.")
         if side is Side.SHORT and stop <= entry:
             raise ValueError("Short stop must be above entry.")
-        margin = self.margin_per_trade / 2.0
+        margin = self.margin_per_trade
         position = self.positions.get(symbol)
         if position is not None and not position.closed:
             allocated = self.margin_per_trade if position.margin_allocated is None else position.margin_allocated
@@ -124,7 +124,7 @@ class DemoAccount:
                 raise ValueError("A pending fill conflicts with the existing demo position.")
             if not position.legs and (position.tp1_done or position.tp2_done or position.tp3_done):
                 raise ValueError("Cannot add a limit fill to a legacy position after a profit target has triggered.")
-            if allocated + margin > self.margin_per_trade + 1e-9:
+            if allocated + margin > (2.0 * self.margin_per_trade) + 1e-9:
                 raise ValueError("The demo position has already used its allocated margin.")
             if self.free_margin < margin:
                 raise ValueError("Insufficient free demo margin.")
@@ -200,53 +200,49 @@ class DemoAccount:
         self.balance += gross - fee
 
     def _process_limit_legs(self, pos: DemoPosition, high: float, low: float) -> list[dict[str, float | str]]:
+        """Manage all filled limit entries as one position with shared exits."""
         events: list[dict[str, float | str]] = []
         long_side = pos.side is Side.LONG
-        for leg in pos.legs:
-            if leg["quantity_remaining"] <= 1e-12:
-                continue
-            stop_hit = low <= leg["stop"] if long_side else high >= leg["stop"]
-            if stop_hit:
-                price = leg["stop"]
-                self._close_leg_fraction(pos, leg, 1.0, price)
-                events.append({"type": "STOP", "price": price, "leg": leg["number"]})
-                continue
+        stop_hit = low <= pos.stop if long_side else high >= pos.stop
+        if stop_hit:
+            price = pos.stop
+            self._close_fraction(pos, 1.0, price)
+            pos.closed = True
+            events.append({"type": "STOP", "price": price})
+            return events
 
-            def target_hit(target: float) -> bool:
-                return high >= target if long_side else low <= target
+        def target_hit(target: float) -> bool:
+            return high >= target if long_side else low <= target
 
-            if not leg["tp1_done"] and target_hit(leg["tp1"]):
-                self._close_leg_fraction(pos, leg, 0.33, leg["tp1"])
-                leg["tp1_done"] = True
-                leg["stop"] = leg["entry"]
-                events.append({"type": "TP1", "price": leg["tp1"], "leg": leg["number"]})
-                moved_stop_hit = low <= leg["stop"] if long_side else high >= leg["stop"]
-                if moved_stop_hit:
-                    self._close_leg_fraction(pos, leg, 1.0, leg["stop"])
-                    events.append({"type": "BREAK_EVEN_STOP", "price": leg["stop"], "leg": leg["number"]})
-                    continue
+        if not pos.tp1_done and target_hit(pos.tp1):
+            self._close_fraction(pos, 0.33, pos.tp1)
+            pos.tp1_done = True
+            pos.stop = pos.entry
+            events.append({"type": "TP1", "price": pos.tp1})
+            moved_stop_hit = low <= pos.stop if long_side else high >= pos.stop
+            if moved_stop_hit:
+                self._close_fraction(pos, 1.0, pos.stop)
+                pos.closed = True
+                events.append({"type": "BREAK_EVEN_STOP", "price": pos.stop})
+                return events
 
-            if not leg["tp2_done"] and target_hit(leg["tp2"]):
-                self._close_leg_fraction(pos, leg, 0.33, leg["tp2"])
-                leg["tp2_done"] = True
-                leg["stop"] = leg["tp1"]
-                events.append({"type": "TP2", "price": leg["tp2"], "leg": leg["number"]})
-                moved_stop_hit = low <= leg["stop"] if long_side else high >= leg["stop"]
-                if moved_stop_hit:
-                    self._close_leg_fraction(pos, leg, 1.0, leg["stop"])
-                    events.append({"type": "TP1_TRAILING_STOP", "price": leg["stop"], "leg": leg["number"]})
-                    continue
+        if not pos.tp2_done and target_hit(pos.tp2):
+            self._close_fraction(pos, 0.33, pos.tp2)
+            pos.tp2_done = True
+            pos.stop = pos.tp1
+            events.append({"type": "TP2", "price": pos.tp2})
+            moved_stop_hit = low <= pos.stop if long_side else high >= pos.stop
+            if moved_stop_hit:
+                self._close_fraction(pos, 1.0, pos.stop)
+                pos.closed = True
+                events.append({"type": "TP1_TRAILING_STOP", "price": pos.stop})
+                return events
 
-            if not leg["tp3_done"] and target_hit(leg["tp3"]):
-                self._close_leg_fraction(pos, leg, 1.0, leg["tp3"])
-                leg["tp3_done"] = True
-                events.append({"type": "TP3", "price": leg["tp3"], "leg": leg["number"]})
-
-        pos.quantity_remaining = sum(leg["quantity_remaining"] for leg in pos.legs)
-        pos.tp1_done = all(leg["tp1_done"] or leg["quantity_remaining"] <= 1e-12 for leg in pos.legs)
-        pos.tp2_done = all(leg["tp2_done"] or leg["quantity_remaining"] <= 1e-12 for leg in pos.legs)
-        pos.tp3_done = all(leg["tp3_done"] or leg["quantity_remaining"] <= 1e-12 for leg in pos.legs)
-        pos.closed = pos.quantity_remaining <= 1e-12
+        if not pos.tp3_done and target_hit(pos.tp3):
+            self._close_fraction(pos, 1.0, pos.tp3)
+            pos.tp3_done = True
+            pos.closed = True
+            events.append({"type": "TP3", "price": pos.tp3})
         return events
 
     def process_candle(self, high: float, low: float, symbol: Optional[str] = None) -> list[dict[str, float | str]]:
@@ -321,15 +317,7 @@ class DemoAccount:
             if pos.closed:
                 continue
             direction = 1.0 if pos.side is Side.LONG else -1.0
-            if pos.legs:
-                # Each limit leg has its own entry and remaining quantity;
-                # aggregate average entry is not accurate after partial exits.
-                total += sum(
-                    (mark_price - leg["entry"]) * leg["quantity_remaining"] * direction
-                    for leg in pos.legs
-                )
-            else:
-                total += (mark_price - pos.entry) * pos.quantity_remaining * direction
+            total += (mark_price - pos.entry) * pos.quantity_remaining * direction
         return total
 
     def equity(self, mark_prices: Optional[dict[str, float]] = None) -> float:
