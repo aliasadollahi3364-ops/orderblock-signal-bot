@@ -198,6 +198,8 @@ class AutomaticScanner:
                                     "symbol": symbol, "side": side.value, "type": "LIMIT_FILLED",
                                     "leg": pending_event.leg_number, "price": pending_event.price,
                                     "time": event_time, "realized_pnl": position.realized_pnl,
+                                    "average_entry": position.entry, "margin_allocated": position.margin_allocated,
+                                    "tp1": position.tp1, "tp2": position.tp2, "tp3": position.tp3,
                                 })
                                 runtime.persist_demo_state()
                                 record = {
@@ -205,6 +207,8 @@ class AutomaticScanner:
                                     "type": "LIMIT_FILLED", "leg": pending_event.leg_number,
                                     "price": pending_event.price, "time": event_time,
                                     "realized_pnl": position.realized_pnl,
+                                    "average_entry": position.entry, "margin_allocated": position.margin_allocated,
+                                    "tp1": position.tp1, "tp2": position.tp2, "tp3": position.tp3,
                                 }
                             except ValueError as exc:
                                 # Do not announce a fill the demo ledger rejected.
