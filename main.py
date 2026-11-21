@@ -11,12 +11,14 @@ from app.charting import make_signal_chart
 from app.config import Settings
 from app.demo import DemoAccount
 from app.market_data import WeexMarketData
+from app.pending_limits import PendingLimit, PendingSetup, make_two_limit_prices
 from app.gold_market import GoldMarketService, format_gold_signal
 from app.runtime import runtime
 from app.scanner import AutomaticScanner, open_demo_from_signal
 from app.storage import SQLiteStore
 from app.strategy import Signal
 from app.telegram_bot import build_telegram_application
+from app.telegram_notifications import format_notification
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("orderblock-signal-bot")
@@ -55,10 +57,22 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
             chart = make_signal_chart(rows, signal.symbol, signal.side, signal.entry, signal.stop, position.tp1, position.tp2, position.tp3)
             entry_time = datetime.fromtimestamp((signal.timestamp + 15*60*1000)/1000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
             method = "برخورد به اردربلاک ۴ساعته + تغییر روند و پولبک ۱۵دقیقه‌ای" if signal.method == "ORDER_BLOCK" else "شکست و پولبک خط روند ۱۵دقیقه‌ای"
+            rsi_caption = {
+                "BULLISH": "واگرایی صعودی هم‌جهت؛ تأیید اضافی",
+                "BEARISH": "واگرایی نزولی هم‌جهت؛ تأیید اضافی",
+                "OPPOSING_BEARISH": "واگرایی نزولی خلاف جهت؛ احتیاط",
+                "OPPOSING_BULLISH": "واگرایی صعودی خلاف جهت؛ احتیاط",
+                "NONE": "بدون واگرایی؛ سیگنال طبق شروط اصلی معتبر می‌ماند",
+                "DISABLED": "بررسی واگرایی خاموش",
+            }.get(signal.rsi_divergence, "نامشخص")
             caption = (
                 f"📣 سیگنال جدید دمو | {signal.symbol}\nروش ورود: {method}\n"
                 "تایم‌فریم صدور سیگنال: ۱۵ دقیقه | روند و محدوده مرجع: اردربلاک ۴ ساعته\n"
-                f"جهت: {signal.side}\nورود: {signal.entry:g}\nحد ضرر: {signal.stop:g}\n"
+                f"جهت: {signal.side}\n"
+                f"واگرایی RSI: {rsi_caption}"
+                + (f" | RSI: {signal.rsi_value:.1f}" if signal.rsi_value is not None else "")
+                + "\n"
+                f"ورود: {signal.entry:g}\nحد ضرر: {signal.stop:g}\n"
                 f"TP1: {position.tp1:g}\nTP2: {position.tp2:g}\nTP3: {position.tp3:g}\n"
                 f"زمان ورود: {entry_time}\n"
                 "زمان خروج: پس از برخورد به حد ضرر یا اهداف، در پیام رویداد ثبت می‌شود.\n"
@@ -68,7 +82,108 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
         except Exception:
             logger.exception("Could not create/send signal chart for %s", signal.symbol)
             send(f"📣 سیگنال دمو {signal.symbol} | {signal.side}\nروش ورود: {signal.method}\nورود: {signal.entry:g}\nحد ضرر: {signal.stop:g}\nفقط دمو؛ معاملات واقعی خاموش")
+    async def send_pending_signal_photo(signal: Signal, near: float, deep: float,
+                                         near_targets: tuple[float, float, float],
+                                         deep_targets: tuple[float, float, float]) -> None:
+        if bot is None:
+            return
+        try:
+            rows = await asyncio.to_thread(market_data.fetch_ohlcv, signal.symbol, "15m", 80)
+            chart = make_signal_chart(
+                rows, signal.symbol, signal.side, near, signal.stop,
+                near_targets[0], near_targets[1], near_targets[2],
+                entry2=deep, tp1_2=deep_targets[0],
+                tp2_2=deep_targets[1], tp3_2=deep_targets[2],
+            )
+            caption = (
+                f"📊 شکست خط روند + اردربلاک | {signal.symbol}\n"
+                f"لیمیت ۱: {near:g} | لیمیت ۲: {deep:g}\n"
+                f"حد ضرر: {signal.stop:g}\n"
+                "اهداف روی نمودار برای هر ورود تخمینی‌اند؛ پس از پرشدن سفارش‌ها، میانگین ورود و اهداف مشترک پوزیشن به‌روز می‌شوند.\n"
+                "مارجین هر لیمیت: ۵ دلار | حداکثر مارجین کل: ۱۰ دلار. فقط حساب دمو."
+            )
+            await bot.send_photo(chat_id=settings.telegram_chat_id, photo=chart, caption=caption)
+        except Exception:
+            logger.exception("Could not create/send two-limit chart for %s", signal.symbol)
+
     def handle_signal(signal: Signal) -> None:
+        if signal.method == "TRENDLINE":
+            # The trendline path alerts immediately, then waits for either of
+            # the two simulated limit prices to be touched on a later 15m bar.
+            try:
+                if signal.ob_top <= signal.ob_bottom or signal.volume_weighted_price is None:
+                    raise ValueError("سیگنال خط روند محدوده اردربلاک معتبر یا قیمت وزنی حجم ندارد.")
+                near, deep = make_two_limit_prices(
+                    signal.side, signal.ob_top, signal.ob_bottom,
+                    signal.volume_weighted_price, reference_price=signal.entry,
+                )
+                created_at = signal.timestamp + 15 * 60 * 1000
+                current_position = runtime.account.positions.get(signal.symbol)
+                position_open = current_position is not None and not current_position.closed
+                if not runtime.pending_limits.can_start_setup(
+                    signal.symbol, position_open=position_open, created_at=created_at
+                ):
+                    logger.info(
+                        "Trendline setup suppressed for %s: open position, active setup, or replay.",
+                        signal.symbol,
+                    )
+                    return
+                setup = PendingSetup(
+                    symbol=signal.symbol,
+                    side=signal.side,
+                    created_at=created_at,
+                    expires_after_bars=runtime.strategy_config.trendline_pullback_max_wait,
+                    invalidation=signal.stop,
+                    stop=signal.stop,
+                    ob_top=signal.ob_top,
+                    ob_bottom=signal.ob_bottom,
+                    limits=[PendingLimit(1, near), PendingLimit(2, deep)],
+                )
+                runtime.pending_limits.add(setup)
+                runtime.persist_pending_limits()
+                def targets(entry: float) -> tuple[float, float, float]:
+                    risk = abs(entry - signal.stop)
+                    sign = 1.0 if signal.side == "BUY" else -1.0
+                    return (entry + sign * risk, entry + sign * 2 * risk, entry + sign * 3 * risk)
+                t1, t2, t3 = targets(near)
+                u1, u2, u3 = targets(deep)
+                entry_time = datetime.fromtimestamp(created_at / 1000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+                rsi_label = {
+                    "BULLISH": "واگرایی هم‌جهت صعودی؛ تأیید RSI",
+                    "BEARISH": "واگرایی هم‌جهت نزولی؛ تأیید RSI",
+                    "OPPOSING_BEARISH": "واگرایی نزولی خلاف جهت خرید؛ احتیاط",
+                    "OPPOSING_BULLISH": "واگرایی صعودی خلاف جهت فروش؛ احتیاط",
+                    "NONE": "واگرایی معتبر مشاهده نشد؛ سیگنال طبق شروط اصلی مجاز است",
+                    "DISABLED": "فیلتر واگرایی RSI خاموش است",
+                }.get(signal.rsi_divergence, "وضعیت واگرایی RSI نامشخص")
+                alert = (
+                    f"🚨 هشدار زودهنگام شکست خط روند + تأیید اردربلاک | {signal.symbol}\n"
+                    f"جهت: {signal.side} | تایم‌فریم: ۱۵ دقیقه\n"
+                    f"واگرایی RSI: {rsi_label}"
+                    + (f" | RSI: {signal.rsi_value:.1f}" if signal.rsi_value is not None else "")
+                    + "\n"
+                    f"لیمیت ۱ (نزدیک‌تر): {near:g} | TP1: {t1:g} | TP2: {t2:g} | TP3: {t3:g}\n"
+                    f"لیمیت ۲ (عمیق‌تر): {deep:g} | TP1: {u1:g} | TP2: {u2:g} | TP3: {u3:g}\n"
+                    f"حد ضرر ساختاری: {signal.stop:g}\n"
+                    "مارجین هر لیمیت: ۵ دلار | در صورت پرشدن هر دو: ۱۰ دلار مارجین\n"
+                    f"زمان تأیید: {entry_time}\n"
+                    "وضعیت: منتظر پولبک و لمس هر لیمیت؛ تا قبل از لمس، معامله‌ای در حساب دمو باز نیست.\n"
+                    "قیمت وزنی از OHLCV و حجم کندل‌ها تخمین زده شده؛ دفتر سفارش یا Volume Profile واقعی نیست.\n"
+                    "حساب دمو | معاملات واقعی: خاموش"
+                )
+                send(alert)
+                if bot is not None:
+                    asyncio.run_coroutine_threadsafe(
+                        send_pending_signal_photo(signal, near, deep,
+                                                  (t1, t2, t3), (u1, u2, u3)),
+                        loop,
+                    )
+            except (ValueError, TypeError) as exc:
+                logger.warning("Trendline pending setup rejected for %s: %s", signal.symbol, exc)
+                send(f"⚠️ سیگنال خط روند {signal.symbol} ایجاد نشد: {exc}")
+            return
+
+        # Preserve the existing order-block-only demo entry flow unchanged.
         position = open_demo_from_signal(signal)
         if position is not None:
             runtime.closed_trade_events.append({
@@ -83,40 +198,48 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
             if bot is not None:
                 asyncio.run_coroutine_threadsafe(send_signal_photo(signal, position), loop)
     def handle_trade_event(event: dict) -> None:
-        """Keep TP/SL milestone notifications permanently in Telegram."""
+        # Delivery is handled by the durable SQLite outbox after the state commit.
+        logger.debug("Trade event queued for durable Telegram delivery: %s", event.get("type"))
+
+    def handle_pending_event(event: dict) -> None:
+        # Delivery is handled by the durable SQLite outbox after the state commit.
+        logger.debug("Pending event queued for durable Telegram delivery: %s", event.get("type"))
+
+    async def dispatch_notifications() -> None:
         if bot is None:
             return
-        event_labels = {
-            "TP1": "🎯 هدف اول (TP1) زده شد",
-            "TP2": "🎯 هدف دوم (TP2) زده شد",
-            "TP3": "🏁 هدف سوم (TP3) زده شد؛ معامله کامل بسته شد",
-            "STOP": "🛑 حد ضرر (SL) فعال شد؛ معامله بسته شد",
-            "BREAK_EVEN_STOP": "⚖️ حد سربه‌سر فعال شد؛ معامله بسته شد",
-            "TP1_TRAILING_STOP": "🔒 حد محافظتی بعد از TP2 فعال شد؛ معامله بسته شد",
-        }
-        label = event_labels.get(str(event.get("type")), f"رویداد معامله: {event.get('type')}")
-        text = (
-            f"{label} | {event['symbol']}\n"
-            f"جهت: {event.get('side', 'نامشخص')}\n"
-            f"قیمت رویداد: {event['price']:g}\n"
-            f"زمان: {event['time']}\n"
-            f"سود/زیان تحقق‌یافته تا این لحظه: {event['realized_pnl']:+.4f} USDT\n"
-            "حساب دمو | معاملات واقعی: خاموش"
-        )
-        future = asyncio.run_coroutine_threadsafe(
-            bot.send_message(chat_id=settings.telegram_chat_id, text=text), loop
-        )
-        future.add_done_callback(
-            lambda result: logger.error("Could not send persistent trade event: %s", result.exception())
-            if result.exception() else None
-        )
+        while True:
+            try:
+                queued = await asyncio.to_thread(runtime.storage.load_notification_outbox, 50)
+                for item in queued:
+                    message = format_notification(item)
+                    try:
+                        await bot.send_message(chat_id=settings.telegram_chat_id, text=message)
+                    except Exception:
+                        logger.exception("Telegram outbox delivery failed for %s", item["event_id"])
+                        break
+                    # Mark only after Telegram confirms success. A crash in the
+                    # tiny send/mark window can cause a retry; Telegram offers
+                    # no idempotency key for sendMessage, so delivery is at-least-once.
+                    await asyncio.to_thread(
+                        runtime.storage.mark_notification_delivered,
+                        item["event_id"],
+                        datetime.now(timezone.utc).isoformat(),
+                    )
+            except Exception:
+                logger.exception("Notification outbox dispatcher failed")
+            await asyncio.sleep(2)
 
     scanner = AutomaticScanner(market_data=market_data, strategy_config=runtime.strategy_config,
         universe_limit=settings.scanner_universe_limit, candidate_limit=settings.scanner_candidate_limit,
         on_signal=handle_signal, on_trade_event=handle_trade_event,
+        on_pending_event=handle_pending_event,
         )
     try:
-        await asyncio.to_thread(scanner.run_forever, settings.scan_interval_seconds)
+        await asyncio.gather(
+            asyncio.to_thread(scanner.run_forever, settings.scan_interval_seconds),
+            dispatch_notifications(),
+        )
     finally:
         market_data.close()
         if bot is not None: await bot.shutdown()
@@ -184,6 +307,7 @@ async def main() -> None:
         initial_balance=settings.demo_initial_balance, margin_per_trade=settings.demo_margin_per_trade,
         leverage=settings.demo_leverage))
     runtime.storage = store
+    runtime.pending_limits = store.load_pending_setups()
     runtime.manual_symbols = store.load_manual_symbols()
     runtime.strategy_config = store.load_strategy_config()
     runtime.persist_demo_state()

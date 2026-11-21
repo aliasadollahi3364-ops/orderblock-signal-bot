@@ -8,7 +8,9 @@ from PIL import Image, ImageDraw
 
 
 def make_signal_chart(rows, symbol: str, side: str, entry: float, stop: float,
-                      tp1: float, tp2: float, tp3: float) -> BytesIO:
+                      tp1: float, tp2: float, tp3: float,
+                      entry2: float | None = None, tp1_2: float | None = None,
+                      tp2_2: float | None = None, tp3_2: float | None = None) -> BytesIO:
     bars = [r for r in rows if len(r) >= 5 and float(r[2]) > 0 and float(r[3]) > 0]
     bars = bars[-70:]
     if not bars:
@@ -18,6 +20,7 @@ def make_signal_chart(rows, symbol: str, side: str, entry: float, stop: float,
     image = Image.new("RGB", (width, height), "#101820")
     draw = ImageDraw.Draw(image)
     prices = [float(r[i]) for r in bars for i in (2, 3)] + [entry, stop, tp1, tp2, tp3]
+    prices.extend(value for value in (entry2, tp1_2, tp2_2, tp3_2) if value is not None)
     lo, hi = min(prices), max(prices)
     pad = max((hi - lo) * 0.08, abs(hi) * 0.0005)
     lo, hi = lo - pad, hi + pad
@@ -35,9 +38,16 @@ def make_signal_chart(rows, symbol: str, side: str, entry: float, stop: float,
         y1, y2 = sorted((y(op), y(close)))
         draw.rectangle((x - max(2, int(step * .28)), y1, x + max(2, int(step * .28)), max(y1 + 2, y2)), fill=color)
     levels = [
-        ("ENTRY", entry, "#ffffff"), ("STOP", stop, "#ff5252"),
-        ("TP1", tp1, "#00c853"), ("TP2", tp2, "#00c853"), ("TP3", tp3, "#00c853"),
+        ("L1 ENTRY", entry, "#ffffff"), ("STOP", stop, "#ff5252"),
+        ("L1 TP1", tp1, "#00c853"), ("L1 TP2", tp2, "#00c853"), ("L1 TP3", tp3, "#00c853"),
     ]
+    if entry2 is not None:
+        levels.extend([
+            ("L2 ENTRY", entry2, "#ffd54f"),
+            ("L2 TP1", tp1_2 if tp1_2 is not None else tp1, "#80cbc4"),
+            ("L2 TP2", tp2_2 if tp2_2 is not None else tp2, "#80cbc4"),
+            ("L2 TP3", tp3_2 if tp3_2 is not None else tp3, "#80cbc4"),
+        ])
     for label, price, color in levels:
         yy = y(price)
         draw.line((left, yy, right, yy), fill=color, width=2)
