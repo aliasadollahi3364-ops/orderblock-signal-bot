@@ -32,6 +32,7 @@ class DemoPosition:
     opened_at: str | None = None
     # None means a legacy position that reserved the full configured margin.
     margin_allocated: float | None = None
+    legs: list[dict] = field(default_factory=list)
 
     @property
     def risk_distance(self) -> float:
@@ -107,7 +108,7 @@ class DemoAccount:
         self.positions[symbol] = position
         return position
 
-    def add_limit_fill(self, symbol: str, side: Side, entry: float, stop: float, opened_at: str | None = None) -> DemoPosition:
+    def add_limit_fill(self, symbol: str, side: Side, entry: float, stop: float, opened_at: str | None = None, leg_number: int = 1) -> DemoPosition:
         """Add one half-size simulated limit fill to an aggregated position."""
         if entry <= 0 or stop <= 0:
             raise ValueError("Entry and stop must be positive.")
@@ -134,7 +135,16 @@ class DemoAccount:
             position.quantity_initial = total_qty
             position.quantity_remaining += new_qty
             position.margin_allocated = allocated + margin
-            risk = abs(position.entry - position.initial_stop)
+            risk = abs(entry - stop)
+            targets_for_leg = ((entry + risk, entry + 2 * risk, entry + 3 * risk)
+                               if side is Side.LONG else
+                               (entry - risk, entry - 2 * risk, entry - 3 * risk))
+            position.legs.append({
+                "number": leg_number, "entry": entry, "stop": stop,
+                "quantity_initial": new_qty, "quantity_remaining": new_qty,
+                "tp1": targets_for_leg[0], "tp2": targets_for_leg[1], "tp3": targets_for_leg[2],
+                "tp1_done": False, "tp2_done": False, "tp3_done": False,
+            })
             targets = ((position.entry + risk, position.entry + 2 * risk, position.entry + 3 * risk) if side is Side.LONG else (position.entry - risk, position.entry - 2 * risk, position.entry - 3 * risk))
             position.tp1, position.tp2, position.tp3 = targets
             assert self.balance is not None
@@ -147,7 +157,19 @@ class DemoAccount:
         targets = ((entry + risk, entry + 2 * risk, entry + 3 * risk) if side is Side.LONG else (entry - risk, entry - 2 * risk, entry - 3 * risk))
         assert self.balance is not None
         self.balance -= margin * self.leverage * self.fee_rate
-        position = DemoPosition(symbol=symbol, side=side, entry=entry, stop=stop, initial_stop=stop, quantity_initial=qty, quantity_remaining=qty, tp1=targets[0], tp2=targets[1], tp3=targets[2], opened_at=opened_at or datetime.now(timezone.utc).isoformat(), margin_allocated=margin)
+        position = DemoPosition(
+            symbol=symbol, side=side, entry=entry, stop=stop, initial_stop=stop,
+            quantity_initial=qty, quantity_remaining=qty,
+            tp1=targets[0], tp2=targets[1], tp3=targets[2],
+            opened_at=opened_at or datetime.now(timezone.utc).isoformat(),
+            margin_allocated=margin,
+            legs=[{
+                "number": leg_number, "entry": entry, "stop": stop,
+                "quantity_initial": qty, "quantity_remaining": qty,
+                "tp1": targets[0], "tp2": targets[1], "tp3": targets[2],
+                "tp1_done": False, "tp2_done": False, "tp3_done": False,
+            }],
+        )
         self.positions[symbol] = position
         return position
     def _close_fraction(self, pos: DemoPosition, fraction: float, price: float) -> float:
@@ -164,6 +186,68 @@ class DemoAccount:
         self.balance += gross - fee
         return net
 
+    def _close_leg_fraction(self, pos: DemoPosition, leg: dict, fraction: float, price: float) -> None:
+        qty = min(leg["quantity_initial"] * fraction, leg["quantity_remaining"])
+        if qty <= 0:
+            return
+        direction = 1.0 if pos.side is Side.LONG else -1.0
+        gross = (price - leg["entry"]) * qty * direction
+        fee = price * qty * self.fee_rate
+        leg["quantity_remaining"] = max(0.0, leg["quantity_remaining"] - qty)
+        pos.realized_pnl += gross - fee
+        assert self.balance is not None
+        self.balance += gross - fee
+
+    def _process_limit_legs(self, pos: DemoPosition, high: float, low: float) -> list[dict[str, float | str]]:
+        events: list[dict[str, float | str]] = []
+        long_side = pos.side is Side.LONG
+        for leg in pos.legs:
+            if leg["quantity_remaining"] <= 1e-12:
+                continue
+            stop_hit = low <= leg["stop"] if long_side else high >= leg["stop"]
+            if stop_hit:
+                price = leg["stop"]
+                self._close_leg_fraction(pos, leg, 1.0, price)
+                events.append({"type": "STOP", "price": price, "leg": leg["number"]})
+                continue
+
+            def target_hit(target: float) -> bool:
+                return high >= target if long_side else low <= target
+
+            if not leg["tp1_done"] and target_hit(leg["tp1"]):
+                self._close_leg_fraction(pos, leg, 0.33, leg["tp1"])
+                leg["tp1_done"] = True
+                leg["stop"] = leg["entry"]
+                events.append({"type": "TP1", "price": leg["tp1"], "leg": leg["number"]})
+                moved_stop_hit = low <= leg["stop"] if long_side else high >= leg["stop"]
+                if moved_stop_hit:
+                    self._close_leg_fraction(pos, leg, 1.0, leg["stop"])
+                    events.append({"type": "BREAK_EVEN_STOP", "price": leg["stop"], "leg": leg["number"]})
+                    continue
+
+            if not leg["tp2_done"] and target_hit(leg["tp2"]):
+                self._close_leg_fraction(pos, leg, 0.33, leg["tp2"])
+                leg["tp2_done"] = True
+                leg["stop"] = leg["tp1"]
+                events.append({"type": "TP2", "price": leg["tp2"], "leg": leg["number"]})
+                moved_stop_hit = low <= leg["stop"] if long_side else high >= leg["stop"]
+                if moved_stop_hit:
+                    self._close_leg_fraction(pos, leg, 1.0, leg["stop"])
+                    events.append({"type": "TP1_TRAILING_STOP", "price": leg["stop"], "leg": leg["number"]})
+                    continue
+
+            if not leg["tp3_done"] and target_hit(leg["tp3"]):
+                self._close_leg_fraction(pos, leg, 1.0, leg["tp3"])
+                leg["tp3_done"] = True
+                events.append({"type": "TP3", "price": leg["tp3"], "leg": leg["number"]})
+
+        pos.quantity_remaining = sum(leg["quantity_remaining"] for leg in pos.legs)
+        pos.tp1_done = all(leg["tp1_done"] or leg["quantity_remaining"] <= 1e-12 for leg in pos.legs)
+        pos.tp2_done = all(leg["tp2_done"] or leg["quantity_remaining"] <= 1e-12 for leg in pos.legs)
+        pos.tp3_done = all(leg["tp3_done"] or leg["quantity_remaining"] <= 1e-12 for leg in pos.legs)
+        pos.closed = pos.quantity_remaining <= 1e-12
+        return events
+
     def process_candle(self, high: float, low: float, symbol: Optional[str] = None) -> list[dict[str, float | str]]:
         """Process one completed OHLC range; the stop wins ambiguous initial bars."""
         if high < low:
@@ -177,6 +261,8 @@ class DemoAccount:
             pos = self.positions.get(symbol)
         if pos is None or pos.closed:
             return []
+        if pos.legs:
+            return self._process_limit_legs(pos, high, low)
 
         events: list[dict[str, float | str]] = []
         long_side = pos.side is Side.LONG
