@@ -361,24 +361,24 @@ class GoldMarketService:
     def investment_report(self) -> str:
         analysis = self.investment_analysis()
         if not analysis.get("ready"):
-            return "🥇 گزارش روزانه طلا\\n" + analysis["message"]
+            return "🥇 گزارش روزانه طلا\n" + analysis["message"]
         def price(value):
             return "ناموجود" if value is None else f"{value:,.0f}"
         premium = analysis["premium_pct"]
         premium_text = "نامشخص" if premium is None else f"{premium:+.2f}%"
         return (
-            "🥇 گزارش روزانه تحلیل طلای ۱۸ عیار\\n"
-            f"قیمت بازار هر گرم: {price(analysis['gold'])} تومان\\n"
-            f"انس جهانی: {price(analysis['ounce'])} دلار\\n"
-            f"دلار آزاد: {price(analysis['usd'])} تومان\\n"
-            f"ارزش ذاتی محاسباتی: {price(analysis['theoretical'])} تومان\\n"
-            f"اختلاف بازار با ارزش ذاتی: {premium_text}\\n"
-            f"روند انس: {analysis['ounce_trend']} | روند دلار: {analysis['usd_trend']}\\n"
-            f"روند طلای داخلی: {analysis['gold_trend']}\\n"
-            f"امتیاز شرایط خرید: {analysis['score']}/100\\n"
-            f"ارزیابی: {analysis['decision']}\\n"
-            "تایید ورود نهایی فقط با سیگنال BUY استراتژی اصلی انجام می‌شود.\\n"
-            "این گزارش تحلیلی است؛ سفارش خرید یا فروش خودکار ندارد.\\n"
+            "🥇 گزارش روزانه تحلیل طلای ۱۸ عیار\n"
+            f"قیمت بازار هر گرم: {price(analysis['gold'])} تومان\n"
+            f"انس جهانی: {price(analysis['ounce'])} دلار\n"
+            f"دلار آزاد: {price(analysis['usd'])} تومان\n"
+            f"ارزش ذاتی محاسباتی: {price(analysis['theoretical'])} تومان\n"
+            f"اختلاف بازار با ارزش ذاتی: {premium_text}\n"
+            f"روند انس: {analysis['ounce_trend']} | روند دلار: {analysis['usd_trend']}\n"
+            f"روند طلای داخلی: {analysis['gold_trend']}\n"
+            f"امتیاز شرایط خرید: {analysis['score']}/100\n"
+            f"ارزیابی: {analysis['decision']}\n"
+            "تایید ورود نهایی فقط با سیگنال BUY استراتژی اصلی انجام می‌شود.\n"
+            "این گزارش تحلیلی است؛ سفارش خرید یا فروش خودکار ندارد.\n"
             "منبع داده: طلاسنج · https://talasanj.info"
         )
 
