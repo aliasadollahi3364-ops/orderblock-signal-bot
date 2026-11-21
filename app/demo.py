@@ -122,8 +122,8 @@ class DemoAccount:
             allocated = self.margin_per_trade if position.margin_allocated is None else position.margin_allocated
             if position.side is not side or abs(position.initial_stop - stop) > max(entry, stop) * 1e-10:
                 raise ValueError("A pending fill conflicts with the existing demo position.")
-            if position.tp1_done or position.tp2_done or position.tp3_done:
-                raise ValueError("Cannot add a limit fill after a profit target has triggered.")
+            if not position.legs and (position.tp1_done or position.tp2_done or position.tp3_done):
+                raise ValueError("Cannot add a limit fill to a legacy position after a profit target has triggered.")
             if allocated + margin > self.margin_per_trade + 1e-9:
                 raise ValueError("The demo position has already used its allocated margin.")
             if self.free_margin < margin:
@@ -145,7 +145,8 @@ class DemoAccount:
                 "tp1": targets_for_leg[0], "tp2": targets_for_leg[1], "tp3": targets_for_leg[2],
                 "tp1_done": False, "tp2_done": False, "tp3_done": False,
             })
-            targets = ((position.entry + risk, position.entry + 2 * risk, position.entry + 3 * risk) if side is Side.LONG else (position.entry - risk, position.entry - 2 * risk, position.entry - 3 * risk))
+            aggregate_risk = abs(position.entry - position.initial_stop)
+            targets = ((position.entry + aggregate_risk, position.entry + 2 * aggregate_risk, position.entry + 3 * aggregate_risk) if side is Side.LONG else (position.entry - aggregate_risk, position.entry - 2 * aggregate_risk, position.entry - 3 * aggregate_risk))
             position.tp1, position.tp2, position.tp3 = targets
             assert self.balance is not None
             self.balance -= margin * self.leverage * self.fee_rate
