@@ -10,6 +10,7 @@ from typing import Any
 
 from app.demo import DemoAccount, DemoPosition, Side
 from app.strategy import StrategyConfig
+from app.pending_limits import PendingLimit, PendingLimitBook, PendingSetup, PendingStatus
 
 
 class SQLiteStore:
@@ -63,6 +64,12 @@ class SQLiteStore:
             db.execute("""
                 CREATE TABLE IF NOT EXISTS demo_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    payload TEXT NOT NULL
+                )
+            """)
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS pending_setups (
+                    symbol TEXT PRIMARY KEY,
                     payload TEXT NOT NULL
                 )
             """)
@@ -174,3 +181,44 @@ class SQLiteStore:
                 for item in db.execute("SELECT payload FROM demo_events ORDER BY id")
             ]
             return account, events
+
+    def save_pending_setups(self, book: PendingLimitBook) -> None:
+        """Persist pending setups atomically, including completed/cancelled leg states."""
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("DELETE FROM pending_setups")
+            rows = []
+            for symbol, setup in book.setups.items():
+                payload = {
+                    "symbol": setup.symbol, "side": setup.side,
+                    "created_at": setup.created_at,
+                    "expires_after_bars": setup.expires_after_bars,
+                    "invalidation": setup.invalidation, "stop": setup.stop,
+                    "ob_top": setup.ob_top, "ob_bottom": setup.ob_bottom,
+                    "last_processed_bar": setup.last_processed_bar,
+                    "limits": [{
+                        "number": leg.number, "price": leg.price,
+                        "status": leg.status.value, "filled_at": leg.filled_at,
+                        "cancelled_at": leg.cancelled_at,
+                        "cancel_reason": leg.cancel_reason,
+                    } for leg in setup.limits],
+                }
+                rows.append((symbol, json.dumps(payload, separators=(",", ":"))))
+            db.executemany("INSERT INTO pending_setups(symbol, payload) VALUES (?, ?)", rows)
+
+    def load_pending_setups(self) -> PendingLimitBook:
+        """Restore pending setups after a process restart."""
+        book = PendingLimitBook()
+        with self._connect() as db:
+            for row in db.execute("SELECT payload FROM pending_setups ORDER BY rowid"):
+                data = json.loads(row["payload"])
+                legs = [PendingLimit(
+                    number=item["number"], price=item["price"],
+                    status=PendingStatus(item["status"]),
+                    filled_at=item.get("filled_at"),
+                    cancelled_at=item.get("cancelled_at"),
+                    cancel_reason=item.get("cancel_reason"),
+                ) for item in data.pop("limits")]
+                setup = PendingSetup(limits=legs, **data)
+                book.setups[setup.symbol] = setup
+        return book
