@@ -184,6 +184,7 @@ async def main() -> None:
         initial_balance=settings.demo_initial_balance, margin_per_trade=settings.demo_margin_per_trade,
         leverage=settings.demo_leverage))
     runtime.storage = store
+    runtime.pending_limits = store.load_pending_setups()
     runtime.manual_symbols = store.load_manual_symbols()
     runtime.strategy_config = store.load_strategy_config()
     runtime.persist_demo_state()
