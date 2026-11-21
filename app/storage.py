@@ -120,6 +120,8 @@ class SQLiteStore:
         # The user's Pine strategy requires a pullback after a trendline break.
         values = asdict(config)
         values["require_trendline_pullback"] = True
+        # Dynamic trailing is not implemented in the multi-target demo ledger yet.
+        values["use_trailing_stop"] = False
         with self._connect() as db:
             db.execute(
                 "INSERT INTO scanner_settings(key, value) VALUES ('strategy_config', ?) "
@@ -144,6 +146,8 @@ class SQLiteStore:
                 values = {key: value for key, value in values.items() if key in allowed}
                 # Keep persisted settings consistent with the supplied Pine source.
                 values["require_trendline_pullback"] = True
+                # Do not restore an enabled but non-functional trailing setting.
+                values["use_trailing_stop"] = False
                 return StrategyConfig(**values)
             except (TypeError, ValueError, json.JSONDecodeError):
                 return StrategyConfig()

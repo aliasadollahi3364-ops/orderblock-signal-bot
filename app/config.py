@@ -8,6 +8,11 @@ class Settings(BaseSettings):
 
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
+    talasanj_api_key: str = ""
+    talasanj_client_name: str = "OrderBlock Signal Bot"
+    talasanj_client_url: str = "https://github.com/aliasadollahi3364-ops/orderblock-signal-bot"
+    gold_poll_seconds: int = Field(default=20, ge=20, le=300)
+    gold_daily_report_hour: int = Field(default=10, ge=0, le=23)
     exchange_id: str = "weex"
     quote_currency: str = "USDT"
     timeframe_entry: str = "15m"
@@ -24,6 +29,8 @@ class Settings(BaseSettings):
     port: int = Field(default=8000, ge=1, le=65535)
 
     def assert_demo_only(self) -> None:
+        if self.exchange_id.lower() != "weex":
+            raise RuntimeError("Only the WEEX public market-data adapter is supported in this bot.")
         if self.live_trading_enabled:
             raise RuntimeError(
                 "LIVE_TRADING_ENABLED=true is prohibited: this application is demo-only."

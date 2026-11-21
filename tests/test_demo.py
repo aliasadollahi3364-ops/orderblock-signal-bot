@@ -2,6 +2,7 @@ import pytest
 
 from app.demo import DemoAccount, Side
 from app.storage import SQLiteStore
+from app.strategy import StrategyConfig
 
 
 def test_demo_position_uses_fixed_margin_and_five_x_leverage():
@@ -105,3 +106,11 @@ def test_sqlite_empty_database_keeps_configured_defaults(tmp_path):
     restored, events = store.load_state(defaults)
     assert restored is defaults
     assert events == []
+
+
+def test_sqlite_does_not_enable_unimplemented_demo_trailing_stop(tmp_path):
+    store = SQLiteStore(str(tmp_path / "strategy.sqlite3"))
+    requested = StrategyConfig(use_trailing_stop=True)
+    store.save_strategy_config(requested)
+    restored = store.load_strategy_config()
+    assert restored.use_trailing_stop is False

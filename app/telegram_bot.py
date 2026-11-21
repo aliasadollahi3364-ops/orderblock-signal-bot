@@ -99,7 +99,7 @@ def _strategy_text() -> str:
         "risk_percent": "ریسک سرمایه درصد", "risk_reward": "نسبت ریسک به سود",
         "sl_buffer_atr": "بافر حدضرر/ATR",
         "use_ob_boundary_sl": "حدضرر مرز OB", "sma_length": "دوره SMA",
-        "use_sma200_filter": "فیلتر SMA200 اردربلاک", "use_trailing_stop": "تریلینگ استاپ",
+        "use_sma200_filter": "فیلتر SMA200 اردربلاک", "use_trailing_stop": "تریلینگ استاپ (در دمو غیرفعال)",
         "trailing_atr_mult": "ضریب تریلینگ", "min_tick": "حداقل گام قیمت",
     }
     lines = ["⚙️ تنظیمات استراتژی", "مسیر اول: برخورد به اردربلاک ۴ساعته + تغییر روند و پولبک ۱۵دقیقه‌ای", "مسیر دوم: شکست خط روند ۱۵دقیقه‌ای + پولبک و تأیید", "محدوده مرجع: اردربلاک ۴ساعته"]
@@ -116,7 +116,7 @@ MAIN_MENU = ReplyKeyboardMarkup(
         ["/status", "/demo"],
         ["/open", "/stats"],
         ["/panel", "/history"],
-        ["/panel", "/history"],
+        ["🥇 همه اطلاعات طلا"],
         ["مدیریت ارزها", "تنظیمات استراتژی"],
         ["/help", "/menu"],
     ],
@@ -130,7 +130,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized(update, context):
         return
     await _reply_temporary(update, context, 
-        "🏠 منوی اصلی ربات\nبرای افزودن ارز: /add BTC | برای حذف: /remove BTC",
+        "🏠 منوی اصلی ربات\nبرای افزودن ارز فقط نماد را بفرست: BTC | برای حذف: /remove BTC",
         reply_markup=MAIN_MENU,
     )
 
@@ -139,8 +139,11 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not await _authorized(update, context):
         return
     text = (update.effective_message.text or "").strip()
+    if text == "🥇 همه اطلاعات طلا":
+        await gold_status(update, context)
+        return
     if text == "مدیریت ارزها":
-        answer = "🪙 مدیریت ارزها\n/pairs فهرست ارزها\n/auto_pairs وضعیت انتخاب خودکار\n/add BTC افزودن ارز\n/remove BTC حذف ارز دستی"
+        answer = "🪙 مدیریت ارزها\n/pairs فهرست ارزها\n/auto_pairs وضعیت انتخاب خودکار\nفقط نام ارز را بفرست (مثال: BTC) برای افزودن ارز\n/remove BTC حذف ارز دستی"
     elif text == "تنظیمات استراتژی":
         answer = "⚙️ تنظیمات استراتژی\n/strategy نمایش همه تنظیمات\n/enable trend روشن کردن فیلتر روند ۴ساعته OB\n/enable trendline فعال‌کردن سیگنال خط روند\n/disable trendline غیرفعال‌کردن سیگنال خط روند\n/enable trendline_pullback الزام پولبک خط روند\n/set pivot4 4 تغییر مقدار عددی\n/reset_strategy بازنشانی تنظیمات"
     else:
@@ -334,16 +337,9 @@ async def pairs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _reply_temporary(update, context, text[start:start + 3800])
 
 
-async def add_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _authorized(update, context):
-        return
-    if not context.args:
-        await _reply_temporary(update, context, "نماد را وارد کن. مثال: /add BTC یا /add BTC/USDT")
-        return
+async def _add_symbol_to_manual_list(update: Update, context: ContextTypes.DEFAULT_TYPE, requested: str) -> None:
     try:
-        candidate = await __import__("asyncio").to_thread(
-            _resolve_symbol, " ".join(context.args)
-        )
+        candidate = await asyncio.to_thread(_resolve_symbol, requested)
         symbol = candidate.symbol
         if symbol in runtime.manual_symbols:
             await _reply_temporary(update, context, f"{symbol} از قبل در فهرست دستی است.")
@@ -351,13 +347,26 @@ async def add_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         runtime.manual_symbols.append(symbol)
         if runtime.storage is not None:
             runtime.storage.save_manual_symbols(runtime.manual_symbols)
-        await _reply_temporary(update, context, 
-            f"✅ {symbol} به فهرست دستی اضافه شد. در اسکن بعدی بررسی می‌شود؛ "
-            "فقط در صورت داشتن اردربلاک معتبر وارد اسکن ۱۵ دقیقه‌ای خواهد شد."
-        )
+        await _reply_temporary(update, context,
+            f"✅ {symbol} به فهرست دستی اضافه شد. فقط ارزهای فهرست دستی اسکن می‌شوند.")
     except Exception as exc:
         await _reply_temporary(update, context, f"❌ افزودن ارز انجام نشد: {exc}")
 
+
+async def add_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    if not context.args:
+        await _reply_temporary(update, context, "فقط نام ارز را بفرست؛ مثال: BTC")
+        return
+    await _add_symbol_to_manual_list(update, context, " ".join(context.args))
+
+
+async def add_pair_by_plain_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    requested = (update.effective_message.text or "").strip()
+    await _add_symbol_to_manual_list(update, context, requested)
 
 async def remove_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized(update, context):
@@ -374,9 +383,16 @@ async def remove_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
     else:
         base = requested[:-4] if requested.endswith("USDT") and len(requested) > 4 else requested
+    def base_of(symbol: str) -> str:
+        value = symbol.strip().upper().replace("-", "")
+        if "/" in value:
+            return value.split("/", 1)[0]
+        if value.endswith("USDT"):
+            return value[:-4]
+        return value
+
     matched = next(
-        (symbol for symbol in runtime.manual_symbols
-         if symbol.split("/", 1)[0].upper() == base),
+        (symbol for symbol in runtime.manual_symbols if base_of(symbol) == base),
         None,
     )
     if matched is None:
@@ -401,7 +417,7 @@ def _resolve_symbol(requested: str):
 async def auto_pairs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await _authorized(update, context):
         await _reply_temporary(update, context, 
-            f"انتخاب خودکار: غیرفعال\nنمادهای دستی: {len(runtime.manual_symbols)}\n"
+            f"افزودن خودکار ارزها: غیرفعال\nنمادهای دستی: {len(runtime.manual_symbols)}\n"
             f"نمادهای واجد شرایط فعلی اسکن: {len(runtime.selected_symbols)}\n"
             "فقط ارزهایی اسکن می‌شوند که خودت با /add اضافه کرده‌ای."
         )
@@ -432,7 +448,6 @@ STRATEGY_ALIASES = {
     "confirm_strength": "use_confirm_strength",
     "ob_boundary_sl": "use_ob_boundary_sl",
     "sma200": "use_sma200_filter",
-    "trailing": "use_trailing_stop",
 }
 
 
@@ -496,6 +511,9 @@ async def toggle_strategy_value(update: Update, context: ContextTypes.DEFAULT_TY
             "ob_touch, choch, retest, confirm_candle, sma200, trailing"
         )
         return
+    if key == "use_trailing_stop" and enabled:
+        await _reply_temporary(update, context, "تریلینگ استاپ هنوز در مدیریت معاملات دمو پیاده‌سازی نشده؛ فعلاً قابل فعال‌سازی نیست.")
+        return
     if key == "require_trendline_pullback" and not enabled:
         await _reply_temporary(update, context, "پولبک خط روند در Pine اصلی اجباری است و نمی‌توان آن را خاموش کرد.")
         return
@@ -521,13 +539,28 @@ async def reset_strategy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await _reply_temporary(update, context, "تنظیمات استراتژی به پیش‌فرض کد بازگشت و ذخیره شد.")
 
 
+async def gold_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    service = runtime.gold_market
+    if service is None:
+        await _reply_temporary(
+            update, context,
+            "🥇 تحلیل طلای ۱۸ عیار هنوز فعال نیست. برای فعال‌سازی، کلید رایگان طلاسنج را با نام TALASANJ_API_KEY در متغیرهای خصوصی HOKAS ثبت کن.\n"
+            "دریافت کلید: @taalasanj_bot ← API برنامه‌نویسان. کلید را در چت ارسال نکن."
+        )
+        return
+    await _reply_temporary(update, context, service.status_text())
+
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized(update, context):
         return
     await _reply_temporary(update, context, 
         "/start - شروع\n/status - وضعیت ربات\n/demo - موجودی دمو\n"
-        "/open - معاملات باز\n/panel - پنل حرفه‌ای حساب دمو\n/history - تاریخچه معاملات\n/pairs - فهرست ارزها\n/add BTC - افزودن ارز دستی\n"
+        "/open - معاملات باز\n/panel - پنل حرفه‌ای حساب دمو\n/history - تاریخچه معاملات\n/pairs - فهرست ارزها\nارسال نام ارز مثل BTC - افزودن ارز دستی\n/add BTC - روش جایگزین افزودن\n"
         "/remove BTC - حذف ارز دستی\n/auto_pairs - وضعیت انتخاب خودکار\n/stats - آمار حساب\n"
+        "/gold - گزارش و وضعیت تحلیل طلای ۱۸ عیار\n"
         "/strategy - نمایش تنظیمات\n/set pivot4 4 - تغییر عدد\n"
         "/enable trendline - فعال‌کردن سیگنال خط روند\n/disable trendline - غیرفعال‌کردن آن\n"
         "/enable trendline_sma - فیلتر SMA200 خط روند\n"
@@ -542,10 +575,11 @@ def build_telegram_application(token: str, allowed_chat_id: str) -> Application:
     application = ApplicationBuilder().token(token).build()
     application.bot_data["allowed_chat_id"] = allowed_chat_id
     for command, callback in (
-        ("start", start), ("menu", menu), ("status", status), ("demo", demo),
+        ("start", start), ("menu", menu), ("status", status), ("gold", gold_status), ("demo", demo),
         ("open", open_positions), ("panel", demo_panel), ("history", trade_history), ("pairs", pairs), ("add", add_pair), ("remove", remove_pair), ("auto_pairs", auto_pairs), ("stats", stats), ("strategy", strategy),
         ("set", set_strategy_value), ("enable", enable_strategy), ("disable", disable_strategy), ("reset_strategy", reset_strategy), ("help", help_command),
     ):
         application.add_handler(CommandHandler(command, callback))
+    application.add_handler(MessageHandler(filters.Regex(r"(?i)^[a-z0-9]{2,20}$"), add_pair_by_plain_text))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_router))
     return application

@@ -43,3 +43,24 @@ def test_active_ob_distance_ignores_inactive_or_used_zones():
     engine.order_blocks.append(OrderBlock(1, 105, 100, 1, active=False))
     engine.order_blocks.append(OrderBlock(-1, 110, 108, 2, used=True))
     assert _active_ob_distance(engine, 102) is None
+
+
+def test_scanner_does_not_discover_or_scan_any_exchange_symbols_automatically(monkeypatch):
+    from app.scanner import AutomaticScanner
+    from app.runtime import runtime
+
+    class ManualOnlyMarketData:
+        def resolve_manual_symbol(self, requested):
+            raise AssertionError("No symbol should be resolved when the manual list is empty.")
+
+        def fetch_usdt_perpetuals(self, limit=500):
+            raise AssertionError("Automatic market discovery must never be called.")
+
+    monkeypatch.setattr(runtime, "manual_symbols", [])
+    monkeypatch.setattr(runtime, "selected_symbols", [])
+    scanner = AutomaticScanner(ManualOnlyMarketData())
+    summary = scanner.scan_once()
+
+    assert summary.markets_seen == 0
+    assert summary.signals == 0
+    assert runtime.selected_symbols == []

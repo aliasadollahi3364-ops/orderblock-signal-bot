@@ -1,4 +1,4 @@
-"""Two-stage WEEX scanner: rank the market universe, then evaluate confirmed OBs.
+"""Two-stage manual-symbol scanner: rank selected markets, then evaluate confirmed OBs.
 
 The scanner is deliberately demo-only. It fetches public candles, never exchange
 account data, and never submits orders.
@@ -10,10 +10,10 @@ import math
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Callable
+from typing import Any, Callable
 
 from app.demo import Side
-from app.market_data import MarketCandidate, WeexMarketData
+from app.market_data import MarketCandidate
 from app.runtime import runtime
 from app.strategy import Candle, OrderBlockStrategy, Signal, StrategyConfig
 
@@ -34,7 +34,7 @@ class ScanSummary:
 def _to_candles(rows: list[list[float]]) -> list[Candle]:
     """Convert exchange OHLCV rows, ignoring malformed or invalid candles.
 
-    Some WEEX markets can return zero, non-finite, or internally inconsistent
+    Some Exchange markets can return zero, non-finite, or internally inconsistent
     OHLC values. One bad row must not abort screening for an entire symbol.
     """
     result = []
@@ -100,7 +100,7 @@ def _active_ob_distance(engine: OrderBlockStrategy, price: float) -> float | Non
 class AutomaticScanner:
     def __init__(
         self,
-        market_data: WeexMarketData,
+        market_data: Any,
         strategy_config: StrategyConfig | None = None,
         universe_limit: int = 500,
         candidate_limit: int = 60,
@@ -127,13 +127,13 @@ class AutomaticScanner:
         strategy_config = runtime.strategy_config or self.strategy_config
         # Manual-only mode: never download or select the exchange-wide market universe.
         # The scanner evaluates only symbols explicitly saved through Telegram /add.
-        manual_markets: list[MarketCandidate] = []
+        manual_markets: list[Any] = []
         for requested in list(runtime.manual_symbols):
             try:
                 manual_markets.append(self.market_data.resolve_manual_symbol(requested))
             except Exception:
                 errors += 1
-                log.warning("Manual symbol unavailable on WEEX: %s", requested)
+                log.warning("Manual symbol unavailable on configured exchange: %s", requested)
         markets = manual_markets
 
         ob_ranked: list[tuple[float, MarketCandidate]] = []
