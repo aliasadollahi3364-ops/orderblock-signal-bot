@@ -181,6 +181,9 @@ class AutomaticScanner:
                     )
                     if pending_events:
                         runtime.persist_pending_limits()
+                    filled_this_bar = any(
+                        event.status == "FILLED" for event in pending_events
+                    )
                     for pending_event in pending_events:
                         event_time = datetime.fromtimestamp(
                             close_time / 1000, timezone.utc
@@ -238,7 +241,8 @@ class AutomaticScanner:
                     position = runtime.account.positions.get(symbol)
                     if position is not None and not position.closed:
                         trade_events = runtime.account.process_candle(
-                            high=bar.high, low=bar.low, symbol=symbol
+                            high=bar.high, low=bar.low, symbol=symbol,
+                            allow_targets=not filled_this_bar,
                         )
                         for event in trade_events:
                             record = {
