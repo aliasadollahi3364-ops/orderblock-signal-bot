@@ -5,7 +5,8 @@ and emits lifecycle events for the scanner/Telegram layer.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+import math
 from enum import Enum
 
 
@@ -76,32 +77,59 @@ class PendingEvent:
 
 
 def make_two_limit_prices(side: str, ob_top: float, ob_bottom: float,
-                          volume_weighted_price: float) -> tuple[float, float]:
-    """Return near and deep entries using the OB range and volume-weighted price.
+                          volume_weighted_price: float,
+                          reference_price: float | None = None) -> tuple[float, float]:
+    """Return near/deep pullback entries inside the OB and on the correct side
+    of the signal price.
 
-    For BUY, near is above deep; for SELL, near is below deep. The VW price
-    must lie inside the supplied OB. This is candle-volume weighting, not
-    exchange order-book liquidity or a full volume-profile feed.
+    BUY entries are strictly below the signal price, with leg 1 nearer/higher
+    and leg 2 deeper/lower. SELL entries are strictly above the signal price,
+    with leg 1 nearer/lower and leg 2 deeper/higher. The VW price is used to
+    position the two entries within the eligible part of the zone.
     """
-    if side not in {"BUY", "SELL"} or ob_bottom <= 0 or ob_top <= ob_bottom:
+    values = (ob_top, ob_bottom, volume_weighted_price)
+    if (side not in {"BUY", "SELL"} or
+            not all(math.isfinite(value) for value in values) or
+            ob_bottom <= 0 or ob_top <= ob_bottom):
         raise ValueError("invalid side or order-block range")
     if not ob_bottom <= volume_weighted_price <= ob_top:
         raise ValueError("volume-weighted price must be inside the OB")
-    midpoint = (ob_top + ob_bottom) / 2.0
-    if side == "BUY":
-        deep = min(volume_weighted_price, midpoint)
-        near = max(volume_weighted_price, midpoint)
-    else:
-        near = min(volume_weighted_price, midpoint)
-        deep = max(volume_weighted_price, midpoint)
-    if near == deep:
-        # A flat VWAP/midpoint cannot create two separate orders; use a
-        # small deterministic split of the OB range.
-        quarter = (ob_top - ob_bottom) * 0.25
+
+    lower, upper = ob_bottom, ob_top
+    if reference_price is not None:
+        if not math.isfinite(reference_price) or reference_price <= 0:
+            raise ValueError("reference price must be positive and finite")
+        # Keep a tiny strict gap so an entry is never placed at or beyond the
+        # breakout candle's close. The available interval is still clipped to
+        # the actual order block.
+        epsilon = max(abs(reference_price) * 1e-9, (ob_top - ob_bottom) * 1e-9, 1e-12)
         if side == "BUY":
-            near, deep = ob_bottom + 0.75 * (ob_top-ob_bottom), ob_bottom + 0.25 * (ob_top-ob_bottom)
+            upper = min(upper, reference_price - epsilon)
         else:
-            near, deep = ob_bottom + 0.25 * (ob_top-ob_bottom), ob_bottom + 0.75 * (ob_top-ob_bottom)
+            lower = max(lower, reference_price + epsilon)
+        if upper - lower <= epsilon:
+            raise ValueError("order block has no room for two pullback limits beyond the signal price")
+
+    midpoint = (upper + lower) / 2.0
+    weighted = min(upper, max(lower, volume_weighted_price))
+    if side == "BUY":
+        near, deep = max(weighted, midpoint), min(weighted, midpoint)
+    else:
+        near, deep = min(weighted, midpoint), max(weighted, midpoint)
+
+    if near - deep <= max(abs(midpoint) * 1e-12, 1e-12):
+        # A flat VW price at the midpoint cannot split the two legs; use
+        # deterministic quarter points in the eligible OB interval.
+        span = upper - lower
+        if side == "BUY":
+            near, deep = lower + 0.75 * span, lower + 0.25 * span
+        else:
+            near, deep = lower + 0.25 * span, lower + 0.75 * span
+
+    if side == "BUY" and not (lower <= deep < near <= upper):
+        raise ValueError("BUY pullback limits are not correctly ordered")
+    if side == "SELL" and not (lower <= near < deep <= upper):
+        raise ValueError("SELL pullback limits are not correctly ordered")
     return near, deep
 
 
