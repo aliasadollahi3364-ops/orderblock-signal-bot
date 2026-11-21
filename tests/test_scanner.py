@@ -115,6 +115,19 @@ def test_scanner_replays_missed_candles_and_fills_both_limit_legs(monkeypatch):
     assert len(position.legs) == 2
     assert position.margin_allocated == pytest.approx(2 * account.margin_per_trade)
     assert account.margin_used == pytest.approx(2 * account.margin_per_trade)
+    # Telegram fill payloads must reflect the actual single-position ledger:
+    # first fill is a 5 USDT margin leg; the second updates weighted entry,
+    # shared targets and total allocated margin to 10 USDT.
+    assert pending_events[0]["price"] == pytest.approx(104)
+    assert pending_events[0]["average_entry"] == pytest.approx(104)
+    assert pending_events[0]["margin_allocated"] == pytest.approx(5)
+    assert pending_events[1]["price"] == pytest.approx(101)
+    assert pending_events[1]["average_entry"] == pytest.approx(position.entry)
+    assert pending_events[1]["margin_allocated"] == pytest.approx(10)
+    assert pending_events[1]["tp1"] == pytest.approx(position.tp1)
+    assert pending_events[1]["tp2"] == pytest.approx(position.tp2)
+    assert pending_events[1]["tp3"] == pytest.approx(position.tp3)
+    assert pending_events[1]["time"].endswith("+00:00")
     assert candidate.last_processed_bar == 12 * MS_15M
 
     # A second scan of the same OHLCV rows must not duplicate fills or PnL.
@@ -214,6 +227,9 @@ def test_scanner_cancels_unfilled_second_limit_after_shared_tp1(monkeypatch):
     ]
     assert "هدف سود" in pending_events[1]["reason"]
     assert [event["type"] for event in trade_events] == ["TP1"]
+    assert trade_events[0]["time"].endswith("+00:00")
+    assert trade_events[0]["price"] == pytest.approx(account.positions["BTC/USDT"].tp1)
+    assert "realized_pnl" in trade_events[0]
     assert account.positions["BTC/USDT"].tp1_done is True
     assert account.positions["BTC/USDT"].closed is False
     assert setup.limits[1].status.value == "CANCELLED"
