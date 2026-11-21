@@ -128,8 +128,10 @@ class PendingLimitBook:
         setup.last_processed_bar = timestamp
         events: list[PendingEvent] = []
 
-        invalidated = (close <= setup.invalidation if setup.side == "BUY"
-                       else close >= setup.invalidation)
+        # A wick through the structural stop invalidates the setup too. If a
+        # candle touches both a limit and invalidation, cancellation wins.
+        invalidated = (low <= setup.invalidation if setup.side == "BUY"
+                       else high >= setup.invalidation)
         expired = timestamp >= setup.created_at + setup.expires_after_bars * 15 * 60 * 1000
         if invalidated or expired:
             reason = "ساختار بازار بی‌اعتبار شد" if invalidated else "مهلت انتظار سفارش تمام شد"
