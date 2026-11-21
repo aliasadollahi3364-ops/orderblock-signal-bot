@@ -233,3 +233,52 @@ def test_trendline_long_is_blocked_when_touched_order_block_is_bearish():
 
     assert engine.on_15m_close(bar(2, 105.0, 107.0, 103.0, 106.0)) is None
     assert engine.on_15m_close(bar(3, 100.0, 101.0, 99.8, 100.8)) is None
+
+
+
+def test_rsi_bullish_divergence_is_detected_and_does_not_gate_signals():
+    from app.strategy import OrderBlock
+
+    cfg = StrategyConfig(
+        pivot15=1, atr_len=1, rsi_length=2, enable_rsi_divergence=True,
+        use_trend_filter=False, use_sma200_filter=False,
+        use_choch_filter=False, use_retest_filter=False,
+        use_confirm_strength=False, use_sma200_trendline_filter=False,
+    )
+    engine = OrderBlockStrategy("BTC/USDT", cfg)
+    # A newly confirmed lower price low with a higher RSI low is bullish divergence.
+    engine.candles15.extend([
+        bar(1, 11, 12, 10, 11),
+        bar(2, 10, 11, 9, 10),
+    ])
+    engine._rsi_values.extend([35.0, 42.0])
+    engine.last_pl15 = 10.0
+    engine._previous_rsi_pivot_low = 35.0
+
+    engine.on_15m_close(bar(3, 10, 11, 9.5, 10.5))
+
+    assert engine._bullish_divergence_bar == 2
+    state, value = engine._signal_rsi_context("BUY", 2)
+    assert state == "BULLISH"
+    assert value is not None
+
+
+def test_no_rsi_divergence_remains_neutral_not_blocked():
+    cfg = StrategyConfig(enable_rsi_divergence=True, rsi_length=2)
+    engine = OrderBlockStrategy("BTC/USDT", cfg)
+    engine.candles15.extend([bar(1, 10, 11, 9, 10), bar(2, 10, 11, 9, 10)])
+    engine._rsi_values.extend([None, None])
+
+    state, value = engine._signal_rsi_context("BUY", 1)
+
+    assert state == "NONE"
+    assert value is None
+
+
+def test_rsi_divergence_can_be_disabled_without_changing_entry_logic():
+    cfg = StrategyConfig(enable_rsi_divergence=False)
+    engine = OrderBlockStrategy("BTC/USDT", cfg)
+    state, value = engine._signal_rsi_context("SELL", 0)
+
+    assert state == "DISABLED"
+    assert value is None
