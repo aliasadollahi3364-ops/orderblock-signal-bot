@@ -331,13 +331,13 @@ class OrderBlockStrategy:
             candidate_rsi = self._rsi_values[candidate] if candidate < len(self._rsi_values) else None
             if self.cfg.enable_rsi_divergence and candidate_rsi is not None:
                 if self._pivot_low(bars, candidate, self.cfg.pivot15, self.cfg.pivot15):
-                    if (self.prev_pl15 is not None and self._previous_rsi_pivot_low is not None
+                    if (self.last_pl15 is not None and self._previous_rsi_pivot_low is not None
                             and bars[candidate].low < self.last_pl15
                             and candidate_rsi > self._previous_rsi_pivot_low):
                         self._bullish_divergence_bar = idx
                     self._previous_rsi_pivot_low = candidate_rsi
                 if self._pivot_high(bars, candidate, self.cfg.pivot15, self.cfg.pivot15):
-                    if (self.prev_ph15 is not None and self._previous_rsi_pivot_high is not None
+                    if (self.last_ph15 is not None and self._previous_rsi_pivot_high is not None
                             and bars[candidate].high > self.last_ph15
                             and candidate_rsi < self._previous_rsi_pivot_high):
                         self._bearish_divergence_bar = idx
