@@ -321,7 +321,15 @@ class DemoAccount:
             if pos.closed:
                 continue
             direction = 1.0 if pos.side is Side.LONG else -1.0
-            total += (mark_price - pos.entry) * pos.quantity_remaining * direction
+            if pos.legs:
+                # Each limit leg has its own entry and remaining quantity;
+                # aggregate average entry is not accurate after partial exits.
+                total += sum(
+                    (mark_price - leg["entry"]) * leg["quantity_remaining"] * direction
+                    for leg in pos.legs
+                )
+            else:
+                total += (mark_price - pos.entry) * pos.quantity_remaining * direction
         return total
 
     def equity(self, mark_prices: Optional[dict[str, float]] = None) -> float:
