@@ -156,7 +156,7 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
                     f"جهت: {signal.side} | تایم‌فریم: ۱۵ دقیقه\n"
                     f"واگرایی RSI: {rsi_label}"
                     + (f" | RSI: {signal.rsi_value:.1f}" if signal.rsi_value is not None else "")
-                    + "\\n"
+                    + "\n"
                     f"لیمیت ۱ (نزدیک‌تر): {near:g} | TP1: {t1:g} | TP2: {t2:g} | TP3: {t3:g}\n"
                     f"لیمیت ۲ (عمیق‌تر): {deep:g} | TP1: {u1:g} | TP2: {u2:g} | TP3: {u3:g}\n"
                     f"حد ضرر ساختاری: {signal.stop:g}\n"
