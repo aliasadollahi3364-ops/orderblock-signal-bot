@@ -162,3 +162,97 @@ def test_outbox_migration_does_not_replay_existing_trade_history(tmp_path):
     store.save_state(account, events)
     store.save_runtime_state(account, events, PendingLimitBook())
     assert store.load_notification_outbox() == []
+
+
+def _assert_closed_trade_snapshot_survives_restart(tmp_path, exit_kind):
+    store = SQLiteStore(str(tmp_path / f"{exit_kind.lower()}-restart.sqlite3"))
+    account = DemoAccount(fee_rate=0)
+    book = PendingLimitBook()
+    setup = PendingSetup(
+        symbol="BTC/USDT", side="BUY", created_at=900_000,
+        expires_after_bars=8, invalidation=99, stop=98,
+        ob_top=106, ob_bottom=100,
+        limits=[
+            PendingLimit(1, 104, PendingStatus.FILLED, filled_at=1_800_000),
+            PendingLimit(2, 101),
+        ],
+    )
+    book.add(setup)
+    position = account.add_limit_fill(
+        "BTC/USDT", Side.LONG, 104, 98,
+        opened_at="1970-01-01T00:30:00+00:00", leg_number=1,
+    )
+    fill_event = {
+        "symbol": "BTC/USDT", "side": "LONG", "type": "LIMIT_FILLED",
+        "leg": 1, "price": 104, "time": "1970-01-01T00:30:00+00:00",
+        "average_entry": 104, "margin_allocated": 5,
+        "tp1": position.tp1, "tp2": position.tp2, "tp3": position.tp3,
+        "realized_pnl": 0.0,
+    }
+    events = [fill_event]
+    store.save_runtime_state(account, events, book)
+    fill_id = store.load_notification_outbox()[0]["event_id"]
+    store.mark_notification_delivered(fill_id, "1970-01-01T00:31:00+00:00")
+
+    if exit_kind == "STOP":
+        candle = {"high": 105, "low": 97}
+    elif exit_kind == "TP3":
+        candle = {"high": position.tp3 + 1, "low": position.tp1 + 1}
+    else:
+        raise AssertionError(f"Unexpected exit kind: {exit_kind}")
+
+    exit_events = account.process_candle(
+        high=candle["high"], low=candle["low"], symbol="BTC/USDT",
+    )
+    assert [event["type"] for event in exit_events] == [exit_kind]
+    assert position.closed is True
+    assert position.quantity_remaining == 0
+    assert account.margin_used == 0
+
+    trade_record = {
+        "symbol": "BTC/USDT", "side": "LONG", **exit_events[0],
+        "type": exit_kind, "time": "1970-01-01T00:45:00+00:00",
+        "realized_pnl": position.realized_pnl,
+    }
+    events.append(trade_record)
+    cancelled = book.cancel(
+        "BTC/USDT", 2_700_000, "پوزیشن بسته شد؛ لیمیت باقیمانده لغو شد",
+    )
+    assert [item.leg_number for item in cancelled] == [2]
+
+    # Closed position, final ledger, pending cancellation and outbox enter one transaction.
+    store.save_runtime_state(account, events, book)
+
+    restarted_store = SQLiteStore(str(tmp_path / f"{exit_kind.lower()}-restart.sqlite3"))
+    restored_account, restored_events = restarted_store.load_state(DemoAccount())
+    restored_book = restarted_store.load_pending_setups()
+    restored = restored_account.positions["BTC/USDT"]
+
+    assert restored.closed is True
+    assert restored.quantity_remaining == 0
+    assert restored.margin_allocated == pytest.approx(5)
+    assert restored_account.margin_used == pytest.approx(0)
+    assert restored_account.balance == pytest.approx(account.balance)
+    assert restored.realized_pnl == pytest.approx(position.realized_pnl)
+    assert restored_events[-1]["type"] == exit_kind
+    assert restored_events[-1]["realized_pnl"] == pytest.approx(position.realized_pnl)
+    assert restored_book.setups["BTC/USDT"].limits[0].status is PendingStatus.FILLED
+    assert restored_book.setups["BTC/USDT"].limits[1].status is PendingStatus.CANCELLED
+
+    pending = restarted_store.load_notification_outbox()
+    assert {item["event"]["type"] for item in pending} == {
+        exit_kind, "LIMIT_CANCELLED",
+    }
+    assert len(pending) == 2
+
+    # Re-saving the same closed snapshot after restart cannot duplicate exit alerts.
+    restarted_store.save_runtime_state(restored_account, restored_events, restored_book)
+    assert len(restarted_store.load_notification_outbox()) == 2
+
+
+def test_stop_close_and_cancel_are_restored_atomically_after_restart(tmp_path):
+    _assert_closed_trade_snapshot_survives_restart(tmp_path, "STOP")
+
+
+def test_tp3_close_and_cancel_are_restored_atomically_after_restart(tmp_path):
+    _assert_closed_trade_snapshot_survives_restart(tmp_path, "TP3")
