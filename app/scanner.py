@@ -187,6 +187,7 @@ class AutomaticScanner:
                             position = runtime.account.add_limit_fill(
                                 symbol, side, pending_event.price, setup.stop,
                                 opened_at=event_time,
+                                leg_number=pending_event.leg_number,
                             )
                             filled_any = True
                             runtime.closed_trade_events.append({
