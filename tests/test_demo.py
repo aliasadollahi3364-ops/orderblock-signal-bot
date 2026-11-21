@@ -23,9 +23,9 @@ def test_two_limit_fills_aggregate_with_weighted_average_and_half_margin():
     assert first.quantity_initial == pytest.approx(0.125)
     assert account.margin_used == pytest.approx(2.5)
 
-    second = account.add_limit_fill("BTC/USDT", Side.LONG, 90.0, 95.0)
+    second = account.add_limit_fill("BTC/USDT", Side.LONG, 98.0, 95.0)
     assert second is first
-    assert second.entry == pytest.approx((100.0 * 0.125 + 90.0 * (12.5 / 90.0)) / (0.125 + 12.5 / 90.0))
+    assert second.entry == pytest.approx((100.0 * 0.125 + 90.0 * (12.5 / 98.0)) / (0.125 + 12.5 / 90.0))
     assert second.quantity_initial == pytest.approx(0.125 + 12.5 / 90.0)
     assert second.quantity_remaining == pytest.approx(second.quantity_initial)
     assert account.margin_used == pytest.approx(5.0)
@@ -50,7 +50,7 @@ def test_partial_limit_position_restores_allocated_margin_and_accepts_second_leg
     store.save_state(account, [])
     restored, _ = store.load_state(DemoAccount())
     assert restored.margin_used == pytest.approx(2.5)
-    position = restored.add_limit_fill("BTC/USDT", Side.LONG, 90.0, 95.0)
+    position = restored.add_limit_fill("BTC/USDT", Side.LONG, 98.0, 95.0)
     assert position.margin_allocated == pytest.approx(5.0)
     assert restored.margin_used == pytest.approx(5.0)
     assert position.quantity_initial == pytest.approx(0.125 + 12.5 / 90.0)
