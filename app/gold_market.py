@@ -175,6 +175,14 @@ class GoldStore:
             ).fetchall()
         return [(int(row[0]), float(row[1])) for row in rows]
 
+    def has_daily_report(self, report_date: str) -> bool:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT 1 FROM gold_daily_reports WHERE report_date=? LIMIT 1",
+                (report_date,),
+            ).fetchone()
+            return row is not None
+
     def claim_daily_report(self, report_date: str) -> bool:
         with self._connect() as db:
             cur = db.execute(
