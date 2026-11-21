@@ -236,12 +236,12 @@ class OrderBlockStrategy:
     def _line_value(p1: float, b1: int, p2: float, b2: int, at: int) -> float:
         return p1 + (p2-p1) * (at-b1) / (b2-b1)
 
-    def _nearest_touched_ob(self, candle: Candle) -> Optional[OrderBlock]:
+    def _nearest_touched_ob(self, candle: Candle, include_used: bool = True) -> Optional[OrderBlock]:
         """Return the nearest active OB actually intersected by this candle."""
         nearest: Optional[OrderBlock] = None
         nearest_distance: Optional[float] = None
         for ob in self.order_blocks:
-            if not ob.active:
+            if not ob.active or (ob.used and not include_used):
                 continue
             if candle.low <= ob.top and candle.high >= ob.bottom:
                 distance = (abs(candle.close - ob.top) if candle.close > ob.top
@@ -318,7 +318,7 @@ class OrderBlockStrategy:
         short_retest = self._short_pending and self._short_break_bar is not None and idx > self._short_break_bar and candle.high >= self._short_level-tol and candle.low <= self._short_level+tol
         long_confirm = long_retest and candle.close > candle.open and candle.close > self._long_level
         short_confirm = short_retest and candle.close < candle.open and candle.close < self._short_level
-        nearest_ob = self._nearest_touched_ob(candle)
+        nearest_ob = self._nearest_touched_ob(candle, include_used=False)
         nearest_dir = nearest_ob.direction if nearest_ob is not None else 0
         # The supplied Pine source requires a post-break pullback and confirmation.
         # Never emit a trendline signal on the breakout candle alone.
