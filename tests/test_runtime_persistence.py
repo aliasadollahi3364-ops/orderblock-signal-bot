@@ -102,6 +102,9 @@ def test_notification_outbox_is_atomic_deduplicated_and_survives_restart(tmp_pat
     book.add(setup)
     store.save_runtime_state(account, [], book)
 
+    # The first leg is already filled; only the deeper second leg remains cancellable.
+    setup.limits[0].status = PendingStatus.FILLED
+    setup.limits[0].filled_at = 1_800_000
     account.add_limit_fill(
         "BTC/USDT", Side.LONG, 104, 98,
         opened_at="1970-01-01T00:30:00+00:00", leg_number=1,
