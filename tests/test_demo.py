@@ -71,7 +71,7 @@ def test_two_limit_fills_use_one_average_entry_and_shared_targets():
     events = account.process_candle(high=103.5, low=99.5, symbol='BTC/USDT')
     assert [event['type'] for event in events] == ['TP1']
     assert position.tp1_done is True
-    assert position.stop == pytest.approx(99.0)
+    assert position.stop == pytest.approx(expected_entry)
     assert position.quantity_remaining == pytest.approx(position.quantity_initial * 0.67)
 
 def test_tp1_and_tp2_move_stop_as_agreed():
