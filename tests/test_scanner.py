@@ -113,8 +113,8 @@ def test_scanner_replays_missed_candles_and_fills_both_limit_legs(monkeypatch):
     ]
     position = account.positions["BTC/USDT"]
     assert len(position.legs) == 2
-    assert position.margin_allocated == pytest.approx(account.margin_per_trade)
-    assert account.margin_used == pytest.approx(account.margin_per_trade)
+    assert position.margin_allocated == pytest.approx(2 * account.margin_per_trade)
+    assert account.margin_used == pytest.approx(2 * account.margin_per_trade)
     assert candidate.last_processed_bar == 12 * MS_15M
 
     # A second scan of the same OHLCV rows must not duplicate fills or PnL.
