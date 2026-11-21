@@ -121,6 +121,14 @@ class GoldStore:
                 signal_key TEXT PRIMARY KEY,
                 created_at TEXT NOT NULL
             )""")
+            db.execute("""CREATE TABLE IF NOT EXISTS gold_daily_reports (
+                report_date TEXT PRIMARY KEY,
+                sent_at TEXT NOT NULL
+            )""")
+            db.execute("""CREATE TABLE IF NOT EXISTS gold_daily_reports (
+                report_date TEXT PRIMARY KEY,
+                sent_at TEXT NOT NULL
+            )""")
 
     @contextmanager
     def _connect(self):
@@ -154,10 +162,26 @@ class GoldStore:
         return inserted
 
     def ticks(self) -> list[tuple[int, float]]:
+        return self.series_ticks("gram18")
+
+    def series_ticks(self, series: str) -> list[tuple[int, float]]:
+        columns = {"gram18": "gram18", "usd": "usd", "ounce": "ounce"}
+        column = columns.get(series)
+        if column is None:
+            raise ValueError("Unsupported gold market series.")
         with self._connect() as db:
-            return [(int(r[0]), float(r[1])) for r in db.execute(
-                "SELECT timestamp_ms,gram18 FROM gold_ticks ORDER BY timestamp_ms"
-            )]
+            rows = db.execute(
+                f"SELECT timestamp_ms,{column} FROM gold_ticks WHERE {column} IS NOT NULL ORDER BY timestamp_ms"
+            ).fetchall()
+        return [(int(row[0]), float(row[1])) for row in rows]
+
+    def claim_daily_report(self, report_date: str) -> bool:
+        with self._connect() as db:
+            cur = db.execute(
+                "INSERT OR IGNORE INTO gold_daily_reports(report_date,sent_at) VALUES(?,?)",
+                (report_date, datetime.now(timezone.utc).isoformat()),
+            )
+            return cur.rowcount > 0
 
     def latest_tick(self) -> tuple[int, float, float | None, float | None] | None:
         with self._connect() as db:
@@ -282,6 +306,81 @@ class GoldMarketService:
                 signals.append(signal)
         self.warmed_up = self.strategy.sma200_4h is not None
         return signals
+
+    @staticmethod
+    def _trend_label(points: list[tuple[int, float]]) -> str:
+        bars = aggregate_candles(points, TIMEFRAMES_MS["4h"])
+        closes = [bar.close for bar in bars]
+        if len(closes) < 20:
+            return "داده کافی نیست"
+        sma20 = sum(closes[-20:]) / 20
+        recent = closes[-5:]
+        rising = recent[-1] > recent[0]
+        falling = recent[-1] < recent[0]
+        if closes[-1] > sma20 and rising:
+            return "صعودی"
+        if closes[-1] < sma20 and falling:
+            return "نزولی"
+        return "خنثی"
+
+    def investment_analysis(self) -> dict[str, Any]:
+        prices = self.latest_prices
+        if not prices:
+            return {"ready": False, "score": 0, "message": "هنوز قیمت زنده دریافت نشده است."}
+        gold = float(prices["gram18"])
+        usd = prices.get("usd")
+        ounce = prices.get("ounce")
+        theoretical = (float(ounce) * float(usd) * 0.75 / 31.1034768) if usd and ounce else None
+        premium = ((gold / theoretical) - 1.0) * 100 if theoretical else None
+        gold_trend = self._trend_label(self.store.series_ticks("gram18"))
+        usd_trend = self._trend_label(self.store.series_ticks("usd"))
+        ounce_trend = self._trend_label(self.store.series_ticks("ounce"))
+
+        def trend_points(label: str, maximum: int) -> int:
+            return maximum if label == "صعودی" else maximum // 2 if label in {"خنثی", "داده کافی نیست"} else 0
+
+        score = trend_points(ounce_trend, 30) + trend_points(usd_trend, 30)
+        score += trend_points(gold_trend, 20)
+        if premium is None:
+            premium_points = 10
+        elif premium <= 1.0:
+            premium_points = 20
+        elif premium <= 3.0:
+            premium_points = 10
+        else:
+            premium_points = 0
+        score += premium_points
+        decision = "بررسی خرید پله‌ای" if score >= 65 else "صبر و بررسی مجدد" if score >= 45 else "فعلاً خرید جدید پرریسک است"
+        return {
+            "ready": True, "score": score, "gold": gold, "usd": usd, "ounce": ounce,
+            "theoretical": theoretical, "premium_pct": premium,
+            "gold_trend": gold_trend, "usd_trend": usd_trend, "ounce_trend": ounce_trend,
+            "decision": decision,
+        }
+
+    def investment_report(self) -> str:
+        analysis = self.investment_analysis()
+        if not analysis.get("ready"):
+            return "🥇 گزارش روزانه طلا\\n" + analysis["message"]
+        def price(value):
+            return "ناموجود" if value is None else f"{value:,.0f}"
+        premium = analysis["premium_pct"]
+        premium_text = "نامشخص" if premium is None else f"{premium:+.2f}%"
+        return (
+            "🥇 گزارش روزانه تحلیل طلای ۱۸ عیار\\n"
+            f"قیمت بازار هر گرم: {price(analysis['gold'])} تومان\\n"
+            f"انس جهانی: {price(analysis['ounce'])} دلار\\n"
+            f"دلار آزاد: {price(analysis['usd'])} تومان\\n"
+            f"ارزش ذاتی محاسباتی: {price(analysis['theoretical'])} تومان\\n"
+            f"اختلاف بازار با ارزش ذاتی: {premium_text}\\n"
+            f"روند انس: {analysis['ounce_trend']} | روند دلار: {analysis['usd_trend']}\\n"
+            f"روند طلای داخلی: {analysis['gold_trend']}\\n"
+            f"امتیاز شرایط خرید: {analysis['score']}/100\\n"
+            f"ارزیابی: {analysis['decision']}\\n"
+            "تایید ورود نهایی فقط با سیگنال BUY استراتژی اصلی انجام می‌شود.\\n"
+            "این گزارش تحلیلی است؛ سفارش خرید یا فروش خودکار ندارد.\\n"
+            "منبع داده: طلاسنج · https://talasanj.info"
+        )
 
     def status_text(self) -> str:
         if not self.latest_prices:
