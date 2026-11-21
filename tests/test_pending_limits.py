@@ -188,3 +188,35 @@ def test_setup_guard_allows_new_timestamp_only_after_position_is_closed():
 
     assert not book.can_start_setup("BTC/USDT", position_open=False, created_at=candidate.created_at)
     assert book.can_start_setup("BTC/USDT", position_open=False, created_at=2_000_000)
+
+def test_new_limit_entry_candle_does_not_award_targets_from_ambiguous_ohlc():
+    from app.demo import DemoAccount, Side
+
+    account = DemoAccount()
+    position = account.add_limit_fill(
+        "BTC/USDT", Side.LONG, entry=100.0, stop=90.0,
+        opened_at="2026-01-01T00:15:00+00:00", leg_number=1,
+    )
+    events = account.process_candle(
+        high=135.0, low=99.0, symbol="BTC/USDT", allow_targets=False
+    )
+    assert events == []
+    assert position.tp1_done is False
+    assert position.tp2_done is False
+    assert position.tp3_done is False
+    assert position.closed is False
+
+
+def test_new_limit_entry_candle_still_honors_stop_conservatively():
+    from app.demo import DemoAccount, Side
+
+    account = DemoAccount()
+    position = account.add_limit_fill(
+        "ETH/USDT", Side.SHORT, entry=100.0, stop=110.0,
+        opened_at="2026-01-01T00:15:00+00:00", leg_number=1,
+    )
+    events = account.process_candle(
+        high=111.0, low=65.0, symbol="ETH/USDT", allow_targets=False
+    )
+    assert [event["type"] for event in events] == ["STOP"]
+    assert position.closed is True
