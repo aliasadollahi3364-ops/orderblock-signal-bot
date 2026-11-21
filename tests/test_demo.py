@@ -42,6 +42,19 @@ def test_two_limit_fills_reject_third_leg_or_conflicting_direction():
         account.add_limit_fill("BTC/USDT", Side.SHORT, 100.0, 105.0)
 
 
+
+def test_partial_limit_position_restores_allocated_margin_and_accepts_second_leg(tmp_path):
+    store = SQLiteStore(str(tmp_path / "two-legs.sqlite3"))
+    account = DemoAccount(fee_rate=0)
+    account.add_limit_fill("BTC/USDT", Side.LONG, 100.0, 95.0)
+    store.save_state(account, [])
+    restored, _ = store.load_state(DemoAccount())
+    assert restored.margin_used == pytest.approx(2.5)
+    position = restored.add_limit_fill("BTC/USDT", Side.LONG, 90.0, 95.0)
+    assert position.margin_allocated == pytest.approx(5.0)
+    assert restored.margin_used == pytest.approx(5.0)
+    assert position.quantity_initial == pytest.approx(0.125 + 12.5 / 90.0)
+
 def test_tp1_and_tp2_move_stop_as_agreed():
     account = DemoAccount(fee_rate=0)
     position = account.open_position("BTC/USDT", Side.LONG, 100.0, 98.0)
