@@ -56,11 +56,19 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
             chart = make_signal_chart(rows, signal.symbol, signal.side, signal.entry, signal.stop, position.tp1, position.tp2, position.tp3)
             entry_time = datetime.fromtimestamp((signal.timestamp + 15*60*1000)/1000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
             method = "برخورد به اردربلاک ۴ساعته + تغییر روند و پولبک ۱۵دقیقه‌ای" if signal.method == "ORDER_BLOCK" else "شکست و پولبک خط روند ۱۵دقیقه‌ای"
+            rsi_caption = {
+                "BULLISH": "واگرایی صعودی هم‌جهت؛ تأیید اضافی",
+                "BEARISH": "واگرایی نزولی هم‌جهت؛ تأیید اضافی",
+                "OPPOSING_BEARISH": "واگرایی نزولی خلاف جهت؛ احتیاط",
+                "OPPOSING_BULLISH": "واگرایی صعودی خلاف جهت؛ احتیاط",
+                "NONE": "بدون واگرایی؛ سیگنال طبق شروط اصلی معتبر می‌ماند",
+                "DISABLED": "بررسی واگرایی خاموش",
+            }.get(signal.rsi_divergence, "نامشخص")
             caption = (
                 f"📣 سیگنال جدید دمو | {signal.symbol}\nروش ورود: {method}\n"
                 "تایم‌فریم صدور سیگنال: ۱۵ دقیقه | روند و محدوده مرجع: اردربلاک ۴ ساعته\n"
                 f"جهت: {signal.side}\n"
-                f"واگرایی RSI: {signal.rsi_divergence}"
+                f"واگرایی RSI: {rsi_caption}"
                 + (f" | RSI: {signal.rsi_value:.1f}" if signal.rsi_value is not None else "")
                 + "\n"
                 f"ورود: {signal.entry:g}\nحد ضرر: {signal.stop:g}\n"
@@ -138,6 +146,8 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
                 rsi_label = {
                     "BULLISH": "واگرایی هم‌جهت صعودی؛ تأیید RSI",
                     "BEARISH": "واگرایی هم‌جهت نزولی؛ تأیید RSI",
+                    "OPPOSING_BEARISH": "واگرایی نزولی خلاف جهت خرید؛ احتیاط",
+                    "OPPOSING_BULLISH": "واگرایی صعودی خلاف جهت فروش؛ احتیاط",
                     "NONE": "واگرایی معتبر مشاهده نشد؛ سیگنال طبق شروط اصلی مجاز است",
                     "DISABLED": "فیلتر واگرایی RSI خاموش است",
                 }.get(signal.rsi_divergence, "وضعیت واگرایی RSI نامشخص")
