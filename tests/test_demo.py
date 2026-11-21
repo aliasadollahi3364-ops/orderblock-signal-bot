@@ -167,3 +167,17 @@ def test_sqlite_does_not_enable_unimplemented_demo_trailing_stop(tmp_path):
     store.save_strategy_config(requested)
     restored = store.load_strategy_config()
     assert restored.use_trailing_stop is False
+
+
+
+def test_unrealized_pnl_uses_each_limit_leg_after_partial_target():
+    account = DemoAccount(fee_rate=0)
+    account.add_limit_fill("BTC/USDT", Side.LONG, 100.0, 95.0, leg_number=1)
+    account.add_limit_fill("BTC/USDT", Side.LONG, 98.0, 95.0, leg_number=2)
+    account.process_candle(high=102.0, low=98.5, symbol="BTC/USDT")
+    position = account.positions["BTC/USDT"]
+    expected = sum(
+        (101.0 - leg["entry"]) * leg["quantity_remaining"]
+        for leg in position.legs
+    )
+    assert account.unrealized_pnl(101.0, "BTC/USDT") == pytest.approx(expected)
