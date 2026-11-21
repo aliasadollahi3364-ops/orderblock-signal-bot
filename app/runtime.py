@@ -7,6 +7,7 @@ from typing import Any
 
 from app.demo import DemoAccount
 from app.strategy import StrategyConfig
+from app.pending_limits import PendingLimitBook
 
 
 @dataclass
@@ -23,10 +24,15 @@ class BotRuntime:
     market_symbol_resolver: Any = None
     strategy_config: StrategyConfig = field(default_factory=StrategyConfig)
     gold_market: Any = None
+    pending_limits: PendingLimitBook = field(default_factory=PendingLimitBook)
 
     def persist_demo_state(self) -> None:
         if self.storage is not None:
             self.storage.save_state(self.account, self.closed_trade_events)
+
+    def persist_pending_limits(self) -> None:
+        if self.storage is not None:
+            self.storage.save_pending_setups(self.pending_limits)
 
 
 runtime = BotRuntime()
