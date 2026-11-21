@@ -333,3 +333,62 @@ def test_scanner_expires_only_unfilled_leg_and_keeps_filled_position(monkeypatch
     assert setup.limits[1].status.value == "CANCELLED"
     assert account.positions["BTC/USDT"].closed is False
     assert account.margin_used == pytest.approx(5.0)
+
+
+def test_two_limit_legs_can_fill_on_different_scans_and_different_candles(monkeypatch):
+    from app.demo import DemoAccount
+    from app.pending_limits import PendingLimit, PendingLimitBook, PendingSetup, PendingStatus
+    from app.runtime import runtime
+    from app.scanner import AutomaticScanner, MS_15M
+
+    class IncrementalMarketData:
+        rows = [[10 * MS_15M, 103, 105, 103, 104, 10]]
+
+        def fetch_ohlcv(self, symbol, timeframe, limit):
+            assert timeframe == "15m"
+            return list(self.rows)
+
+    market = IncrementalMarketData()
+    account = DemoAccount(fee_rate=0)
+    book = PendingLimitBook()
+    setup = PendingSetup(
+        symbol="BTC/USDT", side="BUY", created_at=10 * MS_15M,
+        expires_after_bars=8, invalidation=99, stop=98,
+        ob_top=106, ob_bottom=100,
+        limits=[PendingLimit(1, 104), PendingLimit(2, 101)],
+    )
+    book.add(setup)
+    monkeypatch.setattr(runtime, "account", account)
+    monkeypatch.setattr(runtime, "pending_limits", book)
+    monkeypatch.setattr(runtime, "storage", None)
+    monkeypatch.setattr(runtime, "manual_symbols", [])
+    monkeypatch.setattr(runtime, "selected_symbols", [])
+    monkeypatch.setattr(runtime, "closed_trade_events", [])
+    monkeypatch.setattr("app.scanner.time.time", lambda: 14 * MS_15M / 1000)
+
+    pending_events = []
+    scanner = AutomaticScanner(market, on_pending_event=pending_events.append)
+
+    # First candle reaches only limit 1. Limit 2 must remain pending.
+    scanner.scan_once()
+    position = account.positions["BTC/USDT"]
+    assert len(position.legs) == 1
+    assert position.margin_allocated == pytest.approx(5)
+    assert setup.limits[0].status is PendingStatus.FILLED
+    assert setup.limits[1].status is PendingStatus.PENDING
+    assert [event["leg"] for event in pending_events if event["type"] == "LIMIT_FILLED"] == [1]
+
+    # A later closed candle reaches limit 2; it adds to the same position.
+    market.rows.append([11 * MS_15M, 101, 102, 100, 101, 12])
+    scanner.scan_once()
+    position = account.positions["BTC/USDT"]
+    assert len(position.legs) == 2
+    assert position.margin_allocated == pytest.approx(10)
+    assert setup.limits[1].status is PendingStatus.FILLED
+    fills = [event for event in pending_events if event["type"] == "LIMIT_FILLED"]
+    assert [event["leg"] for event in fills] == [1, 2]
+    assert fills[0]["time"] != fills[1]["time"]
+    assert fills[0]["average_entry"] == pytest.approx(104)
+    assert fills[0]["margin_allocated"] == pytest.approx(5)
+    assert fills[1]["average_entry"] == pytest.approx(position.entry)
+    assert fills[1]["margin_allocated"] == pytest.approx(10)
