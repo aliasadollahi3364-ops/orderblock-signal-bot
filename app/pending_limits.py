@@ -52,7 +52,7 @@ class PendingSetup:
             raise ValueError("setup prices must be finite")
         if self.ob_bottom <= 0 or self.ob_top <= self.ob_bottom:
             raise ValueError("invalid order-block range")
-        if sorted(leg.number for leg in self.limits) != [1, 2]:
+        if [leg.number for leg in self.limits] != [1, 2]:
             raise ValueError("limit legs must be numbered exactly 1 and 2")
         if any(price <= 0 for price in prices) or prices[0] == prices[1]:
             raise ValueError("two distinct positive limit prices are required")
