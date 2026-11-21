@@ -197,7 +197,7 @@ def test_two_short_limit_fills_share_weighted_entry_targets_and_break_even_stop(
     )
     risk = 105.0 - expected_entry
     assert second is first
-    assert second.entry == pytest.approx(101.0)
+    assert second.entry == pytest.approx(expected_entry)
     assert second.tp1 == pytest.approx(expected_entry - risk)
     assert second.tp2 == pytest.approx(expected_entry - 2 * risk)
     assert second.tp3 == pytest.approx(expected_entry - 3 * risk)
