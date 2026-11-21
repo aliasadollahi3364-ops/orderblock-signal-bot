@@ -154,7 +154,7 @@ class AutomaticScanner:
                 if bar is None:
                     continue
                 pending_events = runtime.pending_limits.process_candle(
-                    symbol, bar.timestamp, bar.high, bar.low, bar.close
+                    symbol, bar.timestamp + MS_15M, bar.high, bar.low, bar.close
                 )
                 if not pending_events:
                     continue
