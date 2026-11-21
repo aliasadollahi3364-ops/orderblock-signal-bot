@@ -150,9 +150,9 @@ async def run_gold_scanner(settings: Settings) -> None:
                     if signal.side != "BUY" or analysis.get("score", 0) < 65:
                         continue
                     alert = (
-                        "🚨 فرصت خرید طلا؛ استراتژی اصلی تأیید کرد\\n"
-                        f"امتیاز شرایط بازار: {analysis['score']}/100\\n"
-                        f"روش تأیید: {signal.method} (ساختار ۴ساعته + ورود ۱۵دقیقه‌ای)\\n"
+                        "🚨 فرصت خرید طلا؛ استراتژی اصلی تأیید کرد\n"
+                        f"امتیاز شرایط بازار: {analysis['score']}/100\n"
+                        f"روش تأیید: {signal.method} (ساختار ۴ساعته + ورود ۱۵دقیقه‌ای)\n"
                         + format_gold_signal(signal)
                     )
                     logger.info("Confirmed gold investment buy opportunity: %s", signal.method)
@@ -161,11 +161,12 @@ async def run_gold_scanner(settings: Settings) -> None:
                 tehran_now = datetime.now(ZoneInfo("Asia/Tehran"))
                 if bot is not None and tehran_now.hour >= settings.gold_daily_report_hour:
                     report_date = tehran_now.date().isoformat()
-                    if service.store.claim_daily_report(report_date):
+                    if not service.store.has_daily_report(report_date):
                         await bot.send_message(
                             chat_id=settings.telegram_chat_id,
                             text=service.investment_report(),
                         )
+                        service.store.claim_daily_report(report_date)
             except Exception as exc:
                 service.last_error = str(exc)[:400]
                 logger.exception("Gold investment analysis failed")
