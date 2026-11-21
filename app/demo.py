@@ -30,6 +30,8 @@ class DemoPosition:
     closed: bool = False
     realized_pnl: float = 0.0
     opened_at: str | None = None
+    # None means a legacy position that reserved the full configured margin.
+    margin_allocated: float | None = None
 
     @property
     def risk_distance(self) -> float:
@@ -68,7 +70,7 @@ class DemoAccount:
 
     @property
     def margin_used(self) -> float:
-        return len(self.open_positions) * self.margin_per_trade
+        return sum(self.margin_per_trade if p.margin_allocated is None else p.margin_allocated for p in self.open_positions)
 
     @property
     def free_margin(self) -> float:
@@ -98,11 +100,56 @@ class DemoAccount:
         position = DemoPosition(
             symbol=symbol, side=side, entry=entry, stop=stop, initial_stop=stop,
             quantity_initial=qty, quantity_remaining=qty,
-            tp1=targets[0], tp2=targets[1], tp3=targets[2], opened_at=opened_at or datetime.now(timezone.utc).isoformat(),
+            tp1=targets[0], tp2=targets[1], tp3=targets[2],
+            opened_at=opened_at or datetime.now(timezone.utc).isoformat(),
+            margin_allocated=self.margin_per_trade,
         )
         self.positions[symbol] = position
         return position
 
+    def add_limit_fill(self, symbol: str, side: Side, entry: float, stop: float, opened_at: str | None = None) -> DemoPosition:
+        """Add one half-size simulated limit fill to an aggregated position."""
+        if entry <= 0 or stop <= 0:
+            raise ValueError("Entry and stop must be positive.")
+        if side is Side.LONG and stop >= entry:
+            raise ValueError("Long stop must be below entry.")
+        if side is Side.SHORT and stop <= entry:
+            raise ValueError("Short stop must be above entry.")
+        margin = self.margin_per_trade / 2.0
+        position = self.positions.get(symbol)
+        if position is not None and not position.closed:
+            allocated = self.margin_per_trade if position.margin_allocated is None else position.margin_allocated
+            if position.side is not side or abs(position.initial_stop - stop) > max(entry, stop) * 1e-10:
+                raise ValueError("A pending fill conflicts with the existing demo position.")
+            if position.tp1_done or position.tp2_done or position.tp3_done:
+                raise ValueError("Cannot add a limit fill after a profit target has triggered.")
+            if allocated + margin > self.margin_per_trade + 1e-9:
+                raise ValueError("The demo position has already used its allocated margin.")
+            if self.free_margin < margin:
+                raise ValueError("Insufficient free demo margin.")
+            new_qty = margin * self.leverage / entry
+            old_qty = position.quantity_initial
+            total_qty = old_qty + new_qty
+            position.entry = (position.entry * old_qty + entry * new_qty) / total_qty
+            position.quantity_initial = total_qty
+            position.quantity_remaining += new_qty
+            position.margin_allocated = allocated + margin
+            risk = abs(position.entry - position.initial_stop)
+            targets = ((position.entry + risk, position.entry + 2 * risk, position.entry + 3 * risk) if side is Side.LONG else (position.entry - risk, position.entry - 2 * risk, position.entry - 3 * risk))
+            position.tp1, position.tp2, position.tp3 = targets
+            assert self.balance is not None
+            self.balance -= margin * self.leverage * self.fee_rate
+            return position
+        if self.free_margin < margin:
+            raise ValueError("Insufficient free demo margin.")
+        qty = margin * self.leverage / entry
+        risk = abs(entry - stop)
+        targets = ((entry + risk, entry + 2 * risk, entry + 3 * risk) if side is Side.LONG else (entry - risk, entry - 2 * risk, entry - 3 * risk))
+        assert self.balance is not None
+        self.balance -= margin * self.leverage * self.fee_rate
+        position = DemoPosition(symbol=symbol, side=side, entry=entry, stop=stop, initial_stop=stop, quantity_initial=qty, quantity_remaining=qty, tp1=targets[0], tp2=targets[1], tp3=targets[2], opened_at=opened_at or datetime.now(timezone.utc).isoformat(), margin_allocated=margin)
+        self.positions[symbol] = position
+        return position
     def _close_fraction(self, pos: DemoPosition, fraction: float, price: float) -> float:
         qty = min(pos.quantity_initial * fraction, pos.quantity_remaining)
         if qty <= 0:
