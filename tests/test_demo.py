@@ -15,6 +15,33 @@ def test_demo_position_uses_fixed_margin_and_five_x_leverage():
     assert position.tp3 == pytest.approx(106.0)
 
 
+
+def test_two_limit_fills_aggregate_with_weighted_average_and_half_margin():
+    account = DemoAccount(fee_rate=0)
+    first = account.add_limit_fill("BTC/USDT", Side.LONG, 100.0, 95.0)
+    assert first.entry == pytest.approx(100.0)
+    assert first.quantity_initial == pytest.approx(0.125)
+    assert account.margin_used == pytest.approx(2.5)
+
+    second = account.add_limit_fill("BTC/USDT", Side.LONG, 90.0, 95.0)
+    assert second is first
+    assert second.entry == pytest.approx((100.0 * 0.125 + 90.0 * (12.5 / 90.0)) / (0.125 + 12.5 / 90.0))
+    assert second.quantity_initial == pytest.approx(0.125 + 12.5 / 90.0)
+    assert second.quantity_remaining == pytest.approx(second.quantity_initial)
+    assert account.margin_used == pytest.approx(5.0)
+    assert second.tp1 == pytest.approx(second.entry + (second.entry - 95.0))
+
+
+def test_two_limit_fills_reject_third_leg_or_conflicting_direction():
+    account = DemoAccount(fee_rate=0)
+    account.add_limit_fill("BTC/USDT", Side.LONG, 100.0, 95.0)
+    account.add_limit_fill("BTC/USDT", Side.LONG, 98.0, 95.0)
+    with pytest.raises(ValueError):
+        account.add_limit_fill("BTC/USDT", Side.LONG, 97.0, 95.0)
+    with pytest.raises(ValueError):
+        account.add_limit_fill("BTC/USDT", Side.SHORT, 100.0, 105.0)
+
+
 def test_tp1_and_tp2_move_stop_as_agreed():
     account = DemoAccount(fee_rate=0)
     position = account.open_position("BTC/USDT", Side.LONG, 100.0, 98.0)
