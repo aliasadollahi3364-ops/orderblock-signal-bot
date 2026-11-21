@@ -447,3 +447,63 @@ def test_exit_on_later_candle_without_pending_events_is_timestamped_and_notified
     assert [event["type"] for event in pending_events] == ["LIMIT_CANCELLED"]
     assert pending_events[0]["leg"] == 2
     assert setup.limits[1].status is PendingStatus.CANCELLED
+
+
+def test_tp1_and_deeper_limit_cancellation_are_persisted_in_one_restart_snapshot(monkeypatch, tmp_path):
+    from app.demo import DemoAccount, Side
+    from app.pending_limits import PendingLimit, PendingLimitBook, PendingSetup, PendingStatus
+    from app.runtime import runtime
+    from app.scanner import AutomaticScanner, MS_15M
+    from app.storage import SQLiteStore
+
+    class Tp1MarketData:
+        def fetch_ohlcv(self, symbol, timeframe, limit):
+            return [[11 * MS_15M, 106, 111, 105, 110, 12]]
+
+    store = SQLiteStore(str(tmp_path / "tp1-cancel-atomic.sqlite3"))
+    account = DemoAccount(fee_rate=0)
+    account.add_limit_fill(
+        "BTC/USDT", Side.LONG, 104.0, 98.0,
+        opened_at="2026-01-01T00:15:00+00:00", leg_number=1,
+    )
+    book = PendingLimitBook()
+    candidate = PendingSetup(
+        symbol="BTC/USDT", side="BUY", created_at=10 * MS_15M,
+        expires_after_bars=8, invalidation=99, stop=98,
+        ob_top=106, ob_bottom=100,
+        limits=[
+            PendingLimit(1, 104, PendingStatus.FILLED, filled_at=11 * MS_15M),
+            PendingLimit(2, 101),
+        ],
+        last_processed_bar=11 * MS_15M,
+    )
+    book.add(candidate)
+
+    monkeypatch.setattr(runtime, "account", account)
+    monkeypatch.setattr(runtime, "pending_limits", book)
+    monkeypatch.setattr(runtime, "storage", store)
+    monkeypatch.setattr(runtime, "manual_symbols", [])
+    monkeypatch.setattr(runtime, "selected_symbols", [])
+    monkeypatch.setattr(runtime, "closed_trade_events", [])
+    monkeypatch.setattr("app.scanner.time.time", lambda: 13 * MS_15M / 1000)
+
+    trade_events, pending_events = [], []
+    AutomaticScanner(
+        Tp1MarketData(), on_trade_event=trade_events.append,
+        on_pending_event=pending_events.append,
+    ).scan_once()
+
+    restored_account, restored_events = store.load_state(DemoAccount(fee_rate=0))
+    restored_book = store.load_pending_setups()
+    restored_position = restored_account.positions["BTC/USDT"]
+    restored_setup = restored_book.setups["BTC/USDT"]
+
+    assert restored_position.tp1_done is True
+    assert restored_position.closed is False
+    assert restored_setup.limits[0].status is PendingStatus.FILLED
+    assert restored_setup.limits[1].status is PendingStatus.CANCELLED
+    assert restored_setup.limits[1].cancel_reason is not None
+    assert restored_setup.last_processed_bar == 12 * MS_15M
+    assert [event["type"] for event in restored_events] == ["TP1"]
+    assert [event["type"] for event in trade_events] == ["TP1"]
+    assert [event["type"] for event in pending_events] == ["LIMIT_CANCELLED"]
