@@ -507,3 +507,75 @@ def test_tp1_and_deeper_limit_cancellation_are_persisted_in_one_restart_snapshot
     assert [event["type"] for event in restored_events] == ["TP1"]
     assert [event["type"] for event in trade_events] == ["TP1"]
     assert [event["type"] for event in pending_events] == ["LIMIT_CANCELLED"]
+
+
+def test_first_limit_survives_bounce_before_deeper_second_limit_fills(monkeypatch):
+    """Replay a pullback, rebound, then deeper retest without losing leg 2."""
+    from app.demo import DemoAccount
+    from app.pending_limits import PendingLimit, PendingLimitBook, PendingSetup, PendingStatus
+    from app.runtime import runtime
+    from app.scanner import AutomaticScanner, MS_15M
+
+    class HistoricalPullbackReplay:
+        rows = [
+            # First pullback: only the near limit at 104 is reached.
+            [10 * MS_15M, 105, 106, 103, 104, 120],
+            # Rebound: price moves away; no second fill and no TP1.
+            [11 * MS_15M, 104, 108, 104.5, 107, 95],
+        ]
+
+        def fetch_ohlcv(self, symbol, timeframe, limit):
+            assert timeframe == "15m"
+            return list(self.rows)
+
+    market = HistoricalPullbackReplay()
+    account = DemoAccount(fee_rate=0)
+    book = PendingLimitBook()
+    setup = PendingSetup(
+        symbol="BTC/USDT", side="BUY", created_at=10 * MS_15M,
+        expires_after_bars=8, invalidation=98, stop=98,
+        ob_top=106, ob_bottom=100,
+        limits=[PendingLimit(1, 104), PendingLimit(2, 101)],
+    )
+    book.add(setup)
+
+    monkeypatch.setattr(runtime, "account", account)
+    monkeypatch.setattr(runtime, "pending_limits", book)
+    monkeypatch.setattr(runtime, "storage", None)
+    monkeypatch.setattr(runtime, "manual_symbols", [])
+    monkeypatch.setattr(runtime, "selected_symbols", [])
+    monkeypatch.setattr(runtime, "closed_trade_events", [])
+    monkeypatch.setattr("app.scanner.time.time", lambda: 12 * MS_15M / 1000)
+
+    events = []
+    scanner = AutomaticScanner(market, on_pending_event=events.append)
+
+    scanner.scan_once()
+    position = account.positions["BTC/USDT"]
+    assert len(position.legs) == 1
+    assert position.margin_allocated == pytest.approx(5.0)
+    assert setup.limits[0].status is PendingStatus.FILLED
+    assert setup.limits[1].status is PendingStatus.PENDING
+    assert position.closed is False
+    assert position.tp1_done is False
+    assert [e["leg"] for e in events if e["type"] == "LIMIT_FILLED"] == [1]
+
+    # Later historical candle retests the deeper limit. It must add to the
+    # same aggregate position, not create a second position or duplicate leg 1.
+    market.rows.append(
+        [12 * MS_15M, 103, 104, 100, 102, 140]
+    )
+    monkeypatch.setattr("app.scanner.time.time", lambda: 13 * MS_15M / 1000)
+    scanner.scan_once()
+
+    position = account.positions["BTC/USDT"]
+    assert len(position.legs) == 2
+    assert position.margin_allocated == pytest.approx(10.0)
+    assert account.margin_used == pytest.approx(10.0)
+    assert setup.limits[0].status is PendingStatus.FILLED
+    assert setup.limits[1].status is PendingStatus.FILLED
+    fills = [e for e in events if e["type"] == "LIMIT_FILLED"]
+    assert [e["leg"] for e in fills] == [1, 2]
+    assert fills[0]["average_entry"] == pytest.approx(104)
+    assert fills[1]["average_entry"] == pytest.approx(position.entry)
+    assert fills[1]["margin_allocated"] == pytest.approx(10.0)
