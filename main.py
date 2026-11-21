@@ -141,6 +141,7 @@ async def run_gold_scanner(settings: Settings) -> None:
     try:
         while True:
             try:
+                service.update_strategy_config(runtime.strategy_config)
                 signals = await asyncio.to_thread(service.poll_once)
                 analysis = service.investment_analysis()
                 for signal in signals:
