@@ -21,14 +21,14 @@ def test_two_limit_fills_aggregate_with_weighted_average_and_five_dollars_each()
     first = account.add_limit_fill("BTC/USDT", Side.LONG, 100.0, 95.0)
     assert first.entry == pytest.approx(100.0)
     assert first.quantity_initial == pytest.approx(25.0 / 100.0)
-    assert account.margin_used == pytest.approx(10.0)
+    assert account.margin_used == pytest.approx(5.0)
 
     second = account.add_limit_fill("BTC/USDT", Side.LONG, 98.0, 95.0)
     assert second is first
-    assert second.entry == pytest.approx((100.0 * 0.125 + 98.0 * (12.5 / 98.0)) / (0.125 + 12.5 / 98.0))
+    assert second.entry == pytest.approx((100.0 * 0.25 + 98.0 * (25.0 / 98.0)) / (0.25 + 25.0 / 98.0))
     assert second.quantity_initial == pytest.approx(25.0 / 100.0 + 25.0 / 98.0)
     assert second.quantity_remaining == pytest.approx(second.quantity_initial)
-    assert account.margin_used == pytest.approx(5.0)
+    assert account.margin_used == pytest.approx(10.0)
     assert second.tp1 == pytest.approx(second.entry + (second.entry - 95.0))
     assert second.margin_allocated == pytest.approx(10.0)
 
@@ -50,10 +50,10 @@ def test_partial_limit_position_restores_allocated_margin_and_accepts_second_leg
     account.add_limit_fill("BTC/USDT", Side.LONG, 100.0, 95.0)
     store.save_state(account, [])
     restored, _ = store.load_state(DemoAccount())
-    assert restored.margin_used == pytest.approx(10.0)
+    assert restored.margin_used == pytest.approx(5.0)
     position = restored.add_limit_fill("BTC/USDT", Side.LONG, 98.0, 95.0)
     assert position.margin_allocated == pytest.approx(10.0)
-    assert restored.margin_used == pytest.approx(5.0)
+    assert restored.margin_used == pytest.approx(10.0)
     assert position.quantity_initial == pytest.approx(25.0 / 100.0 + 25.0 / 98.0)
 
 
@@ -62,10 +62,12 @@ def test_two_limit_fills_use_one_average_entry_and_shared_targets():
     account.add_limit_fill("BTC/USDT", Side.LONG, 100.0, 95.0, leg_number=1)
     account.add_limit_fill("BTC/USDT", Side.LONG, 98.0, 95.0, leg_number=2)
     position = account.positions["BTC/USDT"]
-    assert position.entry == pytest.approx(99.0)
-    assert position.tp1 == pytest.approx(103.0)
-    assert position.tp2 == pytest.approx(107.0)
-    assert position.tp3 == pytest.approx(111.0)
+    expected_entry = (100.0 * 0.25 + 98.0 * (25.0 / 98.0)) / (0.25 + 25.0 / 98.0)
+    risk = expected_entry - 95.0
+    assert position.entry == pytest.approx(expected_entry)
+    assert position.tp1 == pytest.approx(expected_entry + risk)
+    assert position.tp2 == pytest.approx(expected_entry + 2 * risk)
+    assert position.tp3 == pytest.approx(expected_entry + 3 * risk)
     events = account.process_candle(high=103.5, low=99.5, symbol='BTC/USDT')
     assert [event['type'] for event in events] == ['TP1']
     assert position.tp1_done is True
@@ -178,7 +180,7 @@ def test_unrealized_pnl_uses_single_weighted_average_after_partial_target():
     account = DemoAccount(fee_rate=0)
     account.add_limit_fill("BTC/USDT", Side.LONG, 100.0, 95.0, leg_number=1)
     account.add_limit_fill("BTC/USDT", Side.LONG, 98.0, 95.0, leg_number=2)
-    account.process_candle(high=102.0, low=98.5, symbol="BTC/USDT")
+    account.process_candle(high=103.5, low=98.5, symbol="BTC/USDT")
     position = account.positions["BTC/USDT"]
     expected = (101.0 - position.entry) * position.quantity_remaining
     assert account.unrealized_pnl(101.0, "BTC/USDT") == pytest.approx(expected)
