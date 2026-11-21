@@ -59,6 +59,31 @@ def test_short_invalidation_cancels_both_legs():
     assert [(e.leg_number, e.status) for e in events] == [(1, "CANCELLED"), (2, "CANCELLED")]
 
 
+
+def test_confirmation_candle_cannot_fill_newly_created_limits():
+    book = PendingLimitBook()
+    candidate = PendingSetup(
+        "XRP/USDT", "BUY", created_at=900_000, expires_after_bars=8,
+        invalidation=90.0, stop=89.0, ob_top=105.0, ob_bottom=95.0,
+        limits=[PendingLimit(1, 103.0), PendingLimit(2, 98.0)],
+    )
+    book.add(candidate)
+    # Timestamp equals the signal candle close; even if its range touched
+    # the proposed levels, orders become eligible only on a later candle.
+    assert book.process_candle("XRP/USDT", 900_000, 104.0, 97.0, 101.0) == []
+    assert all(leg.status is PendingStatus.PENDING for leg in candidate.limits)
+    events = book.process_candle("XRP/USDT", 1_800_000, 104.0, 102.0, 103.0)
+    assert [(event.leg_number, event.status) for event in events] == [(1, "FILLED")]
+
+
+def test_structural_wick_invalidation_precedes_any_limit_touch():
+    book = PendingLimitBook()
+    book.add(setup())
+    events = book.process_candle("BTC/USDT", 900_000, 105.0, 97.5, 103.0)
+    assert [(event.leg_number, event.status) for event in events] == [
+        (1, "CANCELLED"), (2, "CANCELLED")
+    ]
+
 def test_manual_cancel_only_cancels_still_pending_leg():
     book = PendingLimitBook()
     book.add(setup())
