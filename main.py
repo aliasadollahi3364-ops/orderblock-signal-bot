@@ -168,9 +168,26 @@ async def run_scanner(settings: Settings, loop: asyncio.AbstractEventLoop) -> No
             if result.exception() else None
         )
 
+    def handle_pending_event(event: dict) -> None:
+        if event.get("type") == "LIMIT_FILLED":
+            message = (
+                f"✅ لیمیت شماره {event['leg']} پر شد | {event['symbol']}\n"
+                f"جهت: {event['side']}\nقیمت پرشدن دمو: {event['price']:g}\n"
+                f"زمان: {event['time']}\nحساب دمو؛ معاملات واقعی خاموش"
+            )
+        else:
+            message = (
+                f"❌ لیمیت شماره {event['leg']} لغو شد | {event['symbol']}\n"
+                f"جهت: {event['side']}\nقیمت سفارش: {event['price']:g}\n"
+                f"زمان: {event['time']}\nعلت لغو: {event.get('reason', 'نامشخص')}\n"
+                "حساب دمو؛ معاملات واقعی خاموش"
+            )
+        send(message)
+
     scanner = AutomaticScanner(market_data=market_data, strategy_config=runtime.strategy_config,
         universe_limit=settings.scanner_universe_limit, candidate_limit=settings.scanner_candidate_limit,
         on_signal=handle_signal, on_trade_event=handle_trade_event,
+        on_pending_event=handle_pending_event,
         )
     try:
         await asyncio.to_thread(scanner.run_forever, settings.scan_interval_seconds)
