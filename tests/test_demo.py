@@ -53,7 +53,7 @@ def test_partial_limit_position_restores_allocated_margin_and_accepts_second_leg
     position = restored.add_limit_fill("BTC/USDT", Side.LONG, 98.0, 95.0)
     assert position.margin_allocated == pytest.approx(5.0)
     assert restored.margin_used == pytest.approx(5.0)
-    assert position.quantity_initial == pytest.approx(0.125 + 12.5 / 90.0)
+    assert position.quantity_initial == pytest.approx(0.125 + 12.5 / 98.0)
 
 
 def test_limit_legs_keep_independent_targets_and_report_leg_number():
