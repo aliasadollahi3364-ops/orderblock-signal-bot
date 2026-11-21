@@ -1,4 +1,5 @@
-import pytest\nfrom app.scanner import _active_ob_distance, _to_candles
+import pytest
+from app.scanner import _active_ob_distance, _to_candles
 from app.strategy import Candle, OrderBlock, OrderBlockStrategy
 
 
