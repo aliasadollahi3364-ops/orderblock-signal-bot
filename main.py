@@ -229,8 +229,6 @@ async def main() -> None:
     runtime.scanner_state = "WAITING_FOR_MANUAL_SYMBOLS"
     # Start from the exact defaults in the supplied Pine v6 strategy.
     runtime.strategy_config = StrategyConfig()
-    runtime.persist_demo_state()
-
     server = uvicorn.Server(uvicorn.Config(app, host=settings.host, port=settings.port, log_level="info"))
     await asyncio.gather(
         server.serve(),
