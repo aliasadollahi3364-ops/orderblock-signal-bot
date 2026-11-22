@@ -100,10 +100,11 @@ class EarlyWarning:
     side: str
     timestamp: int
     break_price: float
-    trendline_level: float
+    trendline_level: Optional[float]
     stop: float
     ob_top: float
     ob_bottom: float
+    kind: str = "TRENDLINE_BREAK"
 
 
 @dataclass(frozen=True)
@@ -458,6 +459,12 @@ class OrderBlockStrategy:
                     if cfg.use_sma200_filter and (sma is None or candle.close <= sma): continue
                     ob.used = True
                     rsi_state, rsi_value = self._signal_rsi_context("BUY", idx)
+                    if (cfg.use_choch_filter and ob.has_choch and
+                            cfg.use_confirm_candle and bull_dir and bull_power):
+                        self.last_early_warning = EarlyWarning(
+                            self.symbol, "BUY", candle.timestamp, candle.close,
+                            None, stop, top, bottom, "ORDER_BLOCK_CONFIRMATION",
+                        )
                 return Signal(self.symbol, "BUY", candle.timestamp, candle.close, stop, atr,
                               ob.origin_time, top, bottom, self.trend4h, sma, "ORDER_BLOCK",
                               cfg.risk_reward, None, rsi_state, rsi_value)
@@ -468,6 +475,12 @@ class OrderBlockStrategy:
                     if cfg.use_sma200_filter and (sma is None or candle.close >= sma): continue
                     ob.used = True
                     rsi_state, rsi_value = self._signal_rsi_context("SELL", idx)
+                    if (cfg.use_choch_filter and ob.has_choch and
+                            cfg.use_confirm_candle and bear_dir and bear_power):
+                        self.last_early_warning = EarlyWarning(
+                            self.symbol, "SELL", candle.timestamp, candle.close,
+                            None, stop, top, bottom, "ORDER_BLOCK_CONFIRMATION",
+                        )
                 return Signal(self.symbol, "SELL", candle.timestamp, candle.close, stop, atr,
                               ob.origin_time, top, bottom, self.trend4h, sma, "ORDER_BLOCK",
                               cfg.risk_reward, None, rsi_state, rsi_value)
