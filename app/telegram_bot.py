@@ -252,7 +252,7 @@ STRATEGY_BOOL_SETTINGS = {
 }
 STRATEGY_NUMBER_SETTINGS = {
     "risk_percent": ("ریسک هر معامله درصد", 0.1, 5.0),
-    "risk_reward": ("ضریب هدف نهایی R", 1.0, 5.0),
+    "risk_reward": ("ضریب هدف نهایی R", 2.0, 5.0),
     "sl_buffer_atr": ("ضریب فاصله حدضرر ATR", 0.1, 3.0),
     "max_bars_since_touch": ("حداکثر کندل از لمس OB", 1, 100),
     "trendline_pullback_max_wait": ("مهلت پولبک خط روند", 1, 48),
