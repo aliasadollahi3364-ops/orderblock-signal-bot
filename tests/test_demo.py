@@ -276,6 +276,19 @@ def test_two_limit_fills_use_configured_final_risk_reward_for_aggregate_and_each
     assert second.legs[1]["tp3"] == pytest.approx(98.0 + 2.5 * 3.0)
 
 
+def test_invalid_limit_final_rr_does_not_mutate_existing_demo_position():
+    account = DemoAccount(fee_rate=0)
+    position = account.add_limit_fill("BTC/USDT", Side.LONG, 100.0, 95.0, leg_number=1)
+    before = (position.entry, position.quantity_initial, position.margin_allocated, len(position.legs))
+
+    with pytest.raises(ValueError, match="final RR of at least 2.0"):
+        account.add_limit_fill(
+            "BTC/USDT", Side.LONG, 98.0, 95.0, leg_number=2, risk_reward=1.5
+        )
+
+    assert (position.entry, position.quantity_initial, position.margin_allocated, len(position.legs)) == before
+
+
 def test_two_limit_short_position_stop_wins_if_same_candle_touches_stop_and_target():
     account = DemoAccount(fee_rate=0)
     account.add_limit_fill("ETH/USDT", Side.SHORT, 100.0, 105.0, leg_number=1)
