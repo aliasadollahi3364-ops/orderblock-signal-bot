@@ -256,6 +256,39 @@ def test_two_short_limit_fills_share_weighted_entry_targets_and_break_even_stop(
     assert second.quantity_remaining == pytest.approx(0.0)
 
 
+def test_two_limit_fills_use_configured_final_risk_reward_for_aggregate_and_each_leg():
+    account = DemoAccount(fee_rate=0)
+    first = account.add_limit_fill(
+        "BTC/USDT", Side.LONG, 100.0, 95.0, leg_number=1, risk_reward=2.5
+    )
+    second = account.add_limit_fill(
+        "BTC/USDT", Side.LONG, 98.0, 95.0, leg_number=2, risk_reward=2.5
+    )
+
+    expected_entry = (100.0 * 0.25 + 98.0 * (25.0 / 98.0)) / (0.25 + 25.0 / 98.0)
+    aggregate_risk = expected_entry - 95.0
+    assert second is first
+    assert second.entry == pytest.approx(expected_entry)
+    assert second.tp1 == pytest.approx(expected_entry + aggregate_risk)
+    assert second.tp2 == pytest.approx(expected_entry + 2.0 * aggregate_risk)
+    assert second.tp3 == pytest.approx(expected_entry + 2.5 * aggregate_risk)
+    assert second.legs[0]["tp3"] == pytest.approx(100.0 + 2.5 * 5.0)
+    assert second.legs[1]["tp3"] == pytest.approx(98.0 + 2.5 * 3.0)
+
+
+def test_invalid_limit_final_rr_does_not_mutate_existing_demo_position():
+    account = DemoAccount(fee_rate=0)
+    position = account.add_limit_fill("BTC/USDT", Side.LONG, 100.0, 95.0, leg_number=1)
+    before = (position.entry, position.quantity_initial, position.margin_allocated, len(position.legs))
+
+    with pytest.raises(ValueError, match="final RR of at least 2.0"):
+        account.add_limit_fill(
+            "BTC/USDT", Side.LONG, 98.0, 95.0, leg_number=2, risk_reward=1.5
+        )
+
+    assert (position.entry, position.quantity_initial, position.margin_allocated, len(position.legs)) == before
+
+
 def test_two_limit_short_position_stop_wins_if_same_candle_touches_stop_and_target():
     account = DemoAccount(fee_rate=0)
     account.add_limit_fill("ETH/USDT", Side.SHORT, 100.0, 105.0, leg_number=1)

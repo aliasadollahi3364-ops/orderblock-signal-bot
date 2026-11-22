@@ -217,6 +217,7 @@ class AutomaticScanner:
                                     symbol, side, pending_event.price, setup.stop,
                                     opened_at=event_time,
                                     leg_number=pending_event.leg_number,
+                                    risk_reward=runtime.strategy_config.risk_reward,
                                 )
                                 runtime.closed_trade_events.append({
                                     "symbol": symbol, "side": side.value, "type": "LIMIT_FILLED",
