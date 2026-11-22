@@ -455,9 +455,13 @@ class OrderBlockStrategy:
             if can_use and retest and direction == 1 and bull_dir and bull_power and self.last_pl15 is not None:
                 base = min(self.last_pl15, bottom) if cfg.use_ob_boundary_sl else self.last_pl15
                 stop = base-atr*cfg.sl_buffer_atr
-                if candle.close-stop >= cfg.min_tick:
-                    if cfg.use_sma200_filter and (sma is None or candle.close <= sma): continue
-                    ob.used = True
+                # Reject this OB and keep searching if its structural stop is
+                # not below the long entry by at least one minimum tick.
+                if candle.close - stop < cfg.min_tick:
+                    continue
+                if cfg.use_sma200_filter and (sma is None or candle.close <= sma):
+                    continue
+                ob.used = True
                     rsi_state, rsi_value = self._signal_rsi_context("BUY", idx)
                     if (cfg.use_choch_filter and ob.has_choch and
                             cfg.use_confirm_candle and bull_dir and bull_power):
@@ -471,9 +475,13 @@ class OrderBlockStrategy:
             if can_use and retest and direction == -1 and bear_dir and bear_power and self.last_ph15 is not None:
                 base = max(self.last_ph15, top) if cfg.use_ob_boundary_sl else self.last_ph15
                 stop = base+atr*cfg.sl_buffer_atr
-                if stop-candle.close >= cfg.min_tick:
-                    if cfg.use_sma200_filter and (sma is None or candle.close >= sma): continue
-                    ob.used = True
+                # Reject this OB and keep searching if its structural stop is
+                # not above the short entry by at least one minimum tick.
+                if stop - candle.close < cfg.min_tick:
+                    continue
+                if cfg.use_sma200_filter and (sma is None or candle.close >= sma):
+                    continue
+                ob.used = True
                     rsi_state, rsi_value = self._signal_rsi_context("SELL", idx)
                     if (cfg.use_choch_filter and ob.has_choch and
                             cfg.use_confirm_candle and bear_dir and bear_power):
