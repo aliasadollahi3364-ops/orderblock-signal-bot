@@ -1,4 +1,4 @@
-"""Two-stage WEEX scanner: rank the market universe, then evaluate confirmed OBs.
+"""Two-stage manual-symbol scanner: rank selected markets, then evaluate confirmed OBs.
 
 The scanner is deliberately demo-only. It fetches public candles, never exchange
 account data, and never submits orders.
@@ -10,10 +10,11 @@ import math
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Callable
+from typing import Any, Callable
 
 from app.demo import Side
-from app.market_data import MarketCandidate, WeexMarketData
+from app.market_data import MarketCandidate
+from app.pending_limits import PendingStatus
 from app.runtime import runtime
 from app.strategy import Candle, OrderBlockStrategy, Signal, StrategyConfig
 
@@ -34,7 +35,7 @@ class ScanSummary:
 def _to_candles(rows: list[list[float]]) -> list[Candle]:
     """Convert exchange OHLCV rows, ignoring malformed or invalid candles.
 
-    Some WEEX markets can return zero, non-finite, or internally inconsistent
+    Some Exchange markets can return zero, non-finite, or internally inconsistent
     OHLC values. One bad row must not abort screening for an entire symbol.
     """
     result = []
@@ -84,8 +85,8 @@ def _ordered_feed(engine: OrderBlockStrategy, bars4: list[Candle],
     return latest_signal if latest_signal.timestamp == completed_15m[-1].timestamp else None
 
 
-def _active_ob_distance(engine: OrderBlockStrategy, price: float) -> float | None:
-    zones = [ob for ob in engine.order_blocks if ob.active and not ob.used]
+def _active_ob_distance(engine: OrderBlockStrategy, price: float, *, include_used: bool = False) -> float | None:
+    zones = [ob for ob in engine.order_blocks if ob.active and (include_used or not ob.used)]
     if not zones:
         return None
 
@@ -100,12 +101,13 @@ def _active_ob_distance(engine: OrderBlockStrategy, price: float) -> float | Non
 class AutomaticScanner:
     def __init__(
         self,
-        market_data: WeexMarketData,
+        market_data: Any,
         strategy_config: StrategyConfig | None = None,
         universe_limit: int = 500,
         candidate_limit: int = 60,
         on_signal: Callable[[Signal], None] | None = None,
         on_trade_event: Callable[[dict], None] | None = None,
+        on_pending_event: Callable[[dict], None] | None = None,
     ):
         if universe_limit < 1 or candidate_limit < 1:
             raise ValueError("Scanner limits must be positive.")
@@ -115,9 +117,34 @@ class AutomaticScanner:
         self.candidate_limit = candidate_limit
         self.on_signal = on_signal
         self.on_trade_event = on_trade_event
+        self.on_pending_event = on_pending_event
         self._last_demo_bar: dict[str, int] = {}
         self._last_signal_bar: dict[str, int] = {}
         self._selected: list[str] = []
+
+    def _cancel_remaining_pending(self, symbol: str, timestamp: int, reason: str,
+                                  *, persist: bool = True, notify: bool = True) -> list[Any]:
+        """Cancel unfilled legs; callers may defer persistence/notifications for an atomic exit snapshot."""
+        cancelled = runtime.pending_limits.cancel(symbol, timestamp, reason)
+        if not cancelled:
+            return []
+        if persist:
+            runtime.persist_pending_limits()
+        if notify:
+            self._notify_pending_cancellations(symbol, timestamp, cancelled)
+        return cancelled
+
+    def _notify_pending_cancellations(self, symbol: str, timestamp: int,
+                                      cancelled: list[Any]) -> None:
+        event_time = datetime.fromtimestamp(timestamp / 1000, timezone.utc).isoformat()
+        for item in cancelled:
+            if self.on_pending_event:
+                self.on_pending_event({
+                    "symbol": symbol, "side": item.side,
+                    "type": "LIMIT_CANCELLED", "leg": item.leg_number,
+                    "price": item.price, "time": event_time,
+                    "reason": item.reason,
+                })
 
     def scan_once(self) -> ScanSummary:
         runtime.scanner_state = "SCANNING_MARKETS"
@@ -127,14 +154,146 @@ class AutomaticScanner:
         strategy_config = runtime.strategy_config or self.strategy_config
         # Manual-only mode: never download or select the exchange-wide market universe.
         # The scanner evaluates only symbols explicitly saved through Telegram /add.
-        manual_markets: list[MarketCandidate] = []
+        manual_markets: list[Any] = []
         for requested in list(runtime.manual_symbols):
             try:
                 manual_markets.append(self.market_data.resolve_manual_symbol(requested))
             except Exception:
                 errors += 1
-                log.warning("Manual symbol unavailable on WEEX: %s", requested)
+                log.warning("Manual symbol unavailable on configured exchange: %s", requested)
         markets = manual_markets
+
+        # Replay every newly closed 15m candle for pending setups in chronological
+        # order. Looking only at the latest candle can miss a limit touch when
+        # scans are delayed or the process was temporarily offline.
+        now_ms = int(time.time() * 1000)
+        for symbol, setup in list(runtime.pending_limits.setups.items()):
+            position = runtime.account.positions.get(symbol)
+            if not setup.active and (position is None or position.closed):
+                continue
+            try:
+                lookback = max(40, setup.expires_after_bars + 3)
+                rows = self.market_data.fetch_ohlcv(symbol, "15m", lookback)
+                bars = _to_candles(rows)
+                for bar in bars:
+                    close_time = bar.timestamp + MS_15M
+                    event_time = datetime.fromtimestamp(
+                        close_time / 1000, timezone.utc
+                    ).isoformat()
+                    if close_time > now_ms:
+                        continue
+                    if setup.last_processed_bar is not None and close_time <= setup.last_processed_bar:
+                        continue
+                    if close_time <= setup.created_at:
+                        continue
+
+                    pending_events = runtime.pending_limits.process_candle(
+                        symbol, close_time, bar.high, bar.low, bar.close
+                    )
+                    if pending_events:
+                        runtime.persist_pending_limits()
+                    filled_this_bar = any(
+                        event.status == "FILLED" for event in pending_events
+                    )
+                    for pending_event in pending_events:
+                        event_time = datetime.fromtimestamp(
+                            close_time / 1000, timezone.utc
+                        ).isoformat()
+                        if pending_event.status == "FILLED":
+                            side = Side.LONG if pending_event.side == "BUY" else Side.SHORT
+                            try:
+                                position = runtime.account.add_limit_fill(
+                                    symbol, side, pending_event.price, setup.stop,
+                                    opened_at=event_time,
+                                    leg_number=pending_event.leg_number,
+                                )
+                                runtime.closed_trade_events.append({
+                                    "symbol": symbol, "side": side.value, "type": "LIMIT_FILLED",
+                                    "leg": pending_event.leg_number, "price": pending_event.price,
+                                    "time": event_time, "realized_pnl": position.realized_pnl,
+                                    "average_entry": position.entry, "margin_allocated": position.margin_allocated,
+                                    "tp1": position.tp1, "tp2": position.tp2, "tp3": position.tp3,
+                                })
+                                runtime.persist_demo_state()
+                                record = {
+                                    "symbol": symbol, "side": pending_event.side,
+                                    "type": "LIMIT_FILLED", "leg": pending_event.leg_number,
+                                    "price": pending_event.price, "time": event_time,
+                                    "realized_pnl": position.realized_pnl,
+                                    "average_entry": position.entry, "margin_allocated": position.margin_allocated,
+                                    "tp1": position.tp1, "tp2": position.tp2, "tp3": position.tp3,
+                                }
+                            except ValueError as exc:
+                                # Do not announce a fill the demo ledger rejected.
+                                leg = next(x for x in setup.limits if x.number == pending_event.leg_number)
+                                leg.status = PendingStatus.CANCELLED
+                                leg.cancelled_at = close_time
+                                leg.cancel_reason = f"ثبت دمو ناموفق: {exc}"
+                                runtime.persist_pending_limits()
+                                record = {
+                                    "symbol": symbol, "side": pending_event.side,
+                                    "type": "LIMIT_CANCELLED", "leg": pending_event.leg_number,
+                                    "price": pending_event.price, "time": event_time,
+                                    "reason": leg.cancel_reason,
+                                }
+                        else:
+                            record = {
+                                "symbol": symbol, "side": pending_event.side,
+                                "type": "LIMIT_CANCELLED", "leg": pending_event.leg_number,
+                                "price": pending_event.price, "time": event_time,
+                                "reason": pending_event.reason,
+                            }
+                        if self.on_pending_event:
+                            self.on_pending_event(record)
+
+                    # A filled leg becomes a demo position at this candle's
+                    # limit price. Manage it on this and each subsequent closed
+                    # candle, with the demo ledger's conservative stop priority.
+                    position = runtime.account.positions.get(symbol)
+                    if position is not None and not position.closed:
+                        trade_events = runtime.account.process_candle(
+                            high=bar.high, low=bar.low, symbol=symbol,
+                            allow_targets=not filled_this_bar,
+                        )
+                        trade_records = []
+                        for event in trade_events:
+                            record = {
+                                "symbol": symbol, "side": position.side.value,
+                                "time": event_time, **event,
+                                "realized_pnl": position.realized_pnl,
+                            }
+                            runtime.closed_trade_events.append(record)
+                            trade_records.append(record)
+                        cancelled_legs = []
+                        if position.closed:
+                            cancelled_legs = self._cancel_remaining_pending(
+                                symbol, close_time,
+                                "پوزیشن دمو بسته شد؛ لیمیت باقیمانده دیگر معتبر نیست",
+                                persist=False, notify=False,
+                            )
+                        elif any(event.get("type") in {"TP1", "TP2", "TP3"} for event in trade_events):
+                            cancelled_legs = self._cancel_remaining_pending(
+                                symbol, close_time,
+                                "هدف سود فعال شد؛ ورود عمیق‌تر برای همین معامله لغو شد",
+                                persist=False, notify=False,
+                            )
+                        # Persist exit accounting and cancellation of the deeper
+                        # entry leg in the same SQLite transaction before notifying.
+                        if trade_events or cancelled_legs:
+                            runtime.persist_demo_state()
+                        for record in trade_records:
+                            if self.on_trade_event:
+                                self.on_trade_event(record)
+                        if cancelled_legs:
+                            self._notify_pending_cancellations(symbol, close_time, cancelled_legs)
+
+                    # Persist the candle cursor even when no pending event fired,
+                    # so a restart cannot replay an already-managed OHLC range.
+                    runtime.persist_pending_limits()
+                    self._last_demo_bar[symbol] = bar.timestamp
+            except Exception:
+                errors += 1
+                log.exception("Pending limit processing failed for %s", symbol)
 
         ob_ranked: list[tuple[float, MarketCandidate]] = []
         market_cache: dict[str, tuple[list[Candle], list[Candle], float]] = {}
@@ -151,7 +310,7 @@ class AutomaticScanner:
                 last_price = market.last_price
                 if last_price is None or last_price <= 0:
                     continue
-                distance = _active_ob_distance(htf_engine, last_price)
+                distance = _active_ob_distance(htf_engine, last_price, include_used=True)
                 if distance is None:
                     continue
                 score = market.rank_score / (1.0 + distance * 100.0)
@@ -170,7 +329,7 @@ class AutomaticScanner:
         for market in selected_markets:
             try:
                 bars4 = market_cache[market.symbol][0]
-                bars15 = _to_candles(self.market_data.fetch_ohlcv(market.symbol, "15m", 320))
+                bars15 = _to_candles(self.market_data.fetch_ohlcv(market.symbol, "15m", 3520))
                 engine = OrderBlockStrategy(market.symbol, strategy_config)
                 signal = _ordered_feed(engine, bars4, bars15)
                 if signal is not None and self._last_signal_bar.get(signal.symbol) != signal.timestamp:
@@ -198,6 +357,7 @@ class AutomaticScanner:
                 events = runtime.account.process_candle(
                     high=bar.high, low=bar.low, symbol=position.symbol
                 )
+                trade_records = []
                 for event in events:
                     record = {
                         "symbol": position.symbol,
@@ -207,10 +367,28 @@ class AutomaticScanner:
                         "realized_pnl": position.realized_pnl,
                     }
                     runtime.closed_trade_events.append(record)
+                    trade_records.append(record)
+                close_time = bar.timestamp + MS_15M
+                cancelled_legs = []
+                if position.closed:
+                    cancelled_legs = self._cancel_remaining_pending(
+                        position.symbol, close_time,
+                        "پوزیشن دمو بسته شد؛ لیمیت باقیمانده دیگر معتبر نیست",
+                        persist=False, notify=False,
+                    )
+                elif any(event.get("type") in {"TP1", "TP2", "TP3"} for event in events):
+                    cancelled_legs = self._cancel_remaining_pending(
+                        position.symbol, close_time,
+                        "هدف سود فعال شد؛ ورود عمیق‌تر برای همین معامله لغو شد",
+                        persist=False, notify=False,
+                    )
+                if events or cancelled_legs:
+                    runtime.persist_demo_state()
+                for record in trade_records:
                     if self.on_trade_event:
                         self.on_trade_event(record)
-                if events:
-                    runtime.persist_demo_state()
+                if cancelled_legs:
+                    self._notify_pending_cancellations(position.symbol, close_time, cancelled_legs)
             except Exception:
                 errors += 1
                 log.exception("Demo position management failed for %s", position.symbol)
@@ -235,7 +413,10 @@ def open_demo_from_signal(signal: Signal):
     side = Side.LONG if signal.side == "BUY" else Side.SHORT
     try:
         entry_time = datetime.fromtimestamp((signal.timestamp + MS_15M) / 1000, timezone.utc).isoformat()
-        position = runtime.account.open_position(signal.symbol, side, signal.entry, signal.stop, opened_at=entry_time)
+        position = runtime.account.open_position(
+            signal.symbol, side, signal.entry, signal.stop, opened_at=entry_time,
+            risk_percent=runtime.strategy_config.risk_percent, risk_reward=signal.risk_reward,
+        )
         runtime.persist_demo_state()
         return position
     except ValueError as exc:

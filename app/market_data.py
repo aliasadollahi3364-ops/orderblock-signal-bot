@@ -40,48 +40,25 @@ class WeexMarketData:
         })
         self.quote_currency = quote_currency.upper()
         self._markets: dict[str, dict[str, Any]] | None = None
-        self._ticker_cache: tuple[float, dict[str, Any]] | None = None
+        self._ticker_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._ohlcv_cache: dict[tuple[str, str, int], tuple[float, list[list[float]]]] = {}
+        self._trades_cache: dict[tuple[str, int], tuple[float, list[dict[str, Any]]]] = {}
+        self._orderbook_cache: dict[tuple[str, int], tuple[float, dict[str, Any]]] = {}
 
     def load_markets(self) -> dict[str, dict[str, Any]]:
         if self._markets is None:
             self._markets = self.exchange.load_markets()
         return self._markets
 
-    def _fetch_tickers_cached(self) -> dict[str, Any]:
+    def _fetch_ticker_cached(self, symbol: str) -> dict[str, Any]:
+        """Fetch only the explicitly requested symbol's ticker."""
         now = time.monotonic()
-        if self._ticker_cache and now < self._ticker_cache[0]:
-            return self._ticker_cache[1]
-        tickers = self.exchange.fetch_tickers()
-        self._ticker_cache = (now + 60.0, tickers)
-        return tickers
-
-    def fetch_usdt_perpetuals(self, limit: int = 500) -> list[MarketCandidate]:
-        if limit < 1:
-            raise ValueError("limit must be positive")
-        markets = self.load_markets()
-        tickers = self._fetch_tickers_cached()
-        candidates: list[MarketCandidate] = []
-        for symbol, market in markets.items():
-            if not market.get("active", True) or not market.get("swap") or not market.get("linear"):
-                continue
-            if (market.get("quote") or "").upper() != self.quote_currency:
-                continue
-            ticker = tickers.get(symbol) or {}
-            quote_volume = ticker.get("quoteVolume")
-            if quote_volume is None or float(quote_volume) <= 0:
-                base_volume, last = ticker.get("baseVolume"), ticker.get("last")
-                if base_volume is None or last is None:
-                    continue
-                quote_volume = float(base_volume) * float(last)
-            quote_volume = float(quote_volume)
-            bid = float(ticker["bid"]) if ticker.get("bid") else None
-            ask = float(ticker["ask"]) if ticker.get("ask") else None
-            spread, score = _ticker_score(quote_volume, bid, ask)
-            last_price = float(ticker["last"]) if ticker.get("last") else None
-            candidates.append(MarketCandidate(symbol, quote_volume, spread, score, last_price))
-        candidates.sort(key=lambda item: item.rank_score, reverse=True)
-        return candidates[:limit]
+        cached = self._ticker_cache.get(symbol)
+        if cached and now < cached[0]:
+            return cached[1].copy()
+        ticker = self.exchange.fetch_ticker(symbol)
+        self._ticker_cache[symbol] = (now + 60.0, ticker)
+        return ticker.copy()
 
     def resolve_manual_symbol(self, requested: str) -> MarketCandidate:
         """Resolve a user symbol to CCXT's canonical active linear USDT swap symbol.
@@ -134,7 +111,7 @@ class WeexMarketData:
             matches.sort(key=lambda pair: (pair[1].get("settle") != self.quote_currency, pair[0]))
         symbol, _market = matches[0]
 
-        ticker = self._fetch_tickers_cached().get(symbol) or {}
+        ticker = self._fetch_ticker_cached(symbol) or {}
         last = float(ticker.get("last") or 0) or None
         volume = float(ticker.get("quoteVolume") or 0)
         spread, score = _ticker_score(
@@ -153,12 +130,81 @@ class WeexMarketData:
         cached = self._ohlcv_cache.get(key)
         if cached and now < cached[0]:
             return [row[:] for row in cached[1]]
-        rows = self.exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+        if limit <= 1000:
+            rows = self.exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+        else:
+            # Reconstruct enough 15m history to replay the Pine pivots and OB
+            # touch state over the same 4h structural window (220 * 16 bars).
+            timeframe_ms = {"1m": 60_000, "5m": 300_000, "15m": 900_000,
+                            "30m": 1_800_000, "1h": 3_600_000, "4h": 14_400_000}.get(timeframe)
+            if timeframe_ms is None:
+                raise ValueError(f"Unsupported paginated timeframe: {timeframe}")
+            cursor = int(time.time() * 1000) - limit * timeframe_ms
+            rows = []
+            while len(rows) < limit:
+                batch = self.exchange.fetch_ohlcv(
+                    symbol, timeframe=timeframe, since=cursor,
+                    limit=min(1000, limit - len(rows)),
+                )
+                if not batch:
+                    break
+                rows.extend(batch)
+                next_cursor = int(batch[-1][0]) + timeframe_ms
+                if next_cursor <= cursor or len(batch) < 2:
+                    break
+                cursor = next_cursor
+            rows = sorted({int(row[0]): row for row in rows}.values(), key=lambda row: int(row[0]))[-limit:]
         # 4h structure changes only at a 4h close; 15m entry data is refreshed
         # once per minute. CCXT also enforces the exchange's configured rate limit.
         ttl = 900.0 if timeframe == "4h" else 60.0 if timeframe == "15m" else 15.0
         self._ohlcv_cache[key] = (now + ttl, rows)
         return [row[:] for row in rows]
+
+
+    def fetch_trades(self, symbol: str, limit: int = 100) -> list[dict[str, Any]]:
+        """Return normalized public recent trades for the alert-only scanner."""
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        self.load_markets()
+        key = (symbol, limit)
+        now = time.monotonic()
+        cached = self._trades_cache.get(key)
+        if cached and now < cached[0]:
+            return [trade.copy() for trade in cached[1]]
+        raw_trades = self.exchange.fetch_trades(symbol, limit=limit)
+        trades = []
+        for trade in raw_trades:
+            side = str(trade.get("side") or "").lower()
+            try:
+                volume = float(trade.get("amount") or 0)
+                price = float(trade.get("price") or 0)
+            except (TypeError, ValueError):
+                continue
+            if side not in {"buy", "sell"} or volume <= 0 or price <= 0:
+                continue
+            trades.append({"type": side, "volume": volume, "price": price})
+        self._trades_cache[key] = (now + 10.0, trades)
+        return [trade.copy() for trade in trades]
+
+    def fetch_orderbook(self, symbol: str, limit: int = 20) -> dict[str, Any]:
+        """Return a cached public order-book snapshot; never places or changes orders."""
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        self.load_markets()
+        key = (symbol, limit)
+        now = time.monotonic()
+        cached = self._orderbook_cache.get(key)
+        if cached and now < cached[0]:
+            return {"bids": [level[:] for level in cached[1].get("bids", [])],
+                    "asks": [level[:] for level in cached[1].get("asks", [])]}
+        book = self.exchange.fetch_order_book(symbol, limit=limit)
+        normalized = {
+            "bids": [list(level[:2]) for level in book.get("bids", []) if len(level) >= 2],
+            "asks": [list(level[:2]) for level in book.get("asks", []) if len(level) >= 2],
+        }
+        self._orderbook_cache[key] = (now + 5.0, normalized)
+        return {"bids": [level[:] for level in normalized["bids"]],
+                "asks": [level[:] for level in normalized["asks"]]}
 
     def close(self) -> None:
         close = getattr(self.exchange, "close", None)

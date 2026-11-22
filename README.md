@@ -42,3 +42,12 @@ Install dependencies with `pip install -r requirements.txt`, copy `.env.example`
 ## Status
 
 The project includes the strategy engine, demo ledger, two-stage scanner, read-only API, basic Telegram commands, and SQLite persistence. Automated tests and live WEEX verification must be run before relying on it. No live trading functionality is implemented.
+
+
+## Iranian 18k gold investment analysis
+
+An independent Telegram module samples Talasanj prices for 18k gold, the free-market USD rate, and the global ounce. It calculates the theoretical 18k gram price, compares it with the reported local price, and sends a once-daily Tehran-time report (default 10:00). Immediate buy alerts require both a BUY signal from the existing 4H order-block / 15m strategy and a market score of at least 65/100. It never selects a gold fund, opens a crypto demo position, or submits any order.
+
+Set `TALASANJ_API_KEY` privately in the hosting environment. Optional settings: `GOLD_POLL_SECONDS` (default 20) and `GOLD_DAILY_REPORT_HOUR` (default 10, Tehran time). The free Talasanj API key can be created through `@taalasanj_bot`; attribution is included in reports.
+
+The existing strategy's 4H SMA200 filter is not disabled. Talasanj's intraday history is limited, so the gold strategy must first collect 200 closed 4H candles locally (roughly 34 days of continuous data) before it can issue confirmed strategy alerts. Daily valuation reports can start as soon as live prices arrive.

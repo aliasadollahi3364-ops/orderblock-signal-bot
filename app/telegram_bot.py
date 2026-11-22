@@ -1,52 +1,45 @@
-"""Telegram status interface. This module cannot submit exchange orders."""
+"""Telegram interface for the preserved demo account and Iranian 18k gold module."""
 from __future__ import annotations
 
-from dataclasses import asdict
-from io import BytesIO
-
-from PIL import Image, ImageDraw
+import asyncio
+import logging
 
 from telegram import ReplyKeyboardMarkup, Update
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 from app.runtime import runtime
-from app.strategy import StrategyConfig
-
-import asyncio
-import logging
-from telegram.error import TelegramError
 
 logger = logging.getLogger(__name__)
-
 TEMP_MESSAGE_TTL_SECONDS = 120
+
+MAIN_MENU = ReplyKeyboardMarkup(
+    [
+        ["/status", "/demo"],
+        ["/open", "/stats"],
+        ["/history", "/panel"],
+        ["/symbols", "/add", "/remove"],
+        ["🥇 همه اطلاعات طلا"],
+        ["/help", "/menu"],
+    ],
+    resize_keyboard=True,
+    is_persistent=True,
+    input_field_placeholder="یک بخش را انتخاب کن...",
+)
 
 
 async def _delete_later(bot, chat_id: int, message_id: int) -> None:
     await asyncio.sleep(TEMP_MESSAGE_TTL_SECONDS)
     try:
         await bot.delete_message(chat_id=chat_id, message_id=message_id)
-    except TelegramError:
-        logger.exception("Could not delete temporary Telegram message %s in chat %s", message_id, chat_id)
+    except Exception:
+        pass
 
 
 async def _reply_temporary(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, **kwargs):
+    if not update.effective_message:
+        return
     message = await update.effective_message.reply_text(text, **kwargs)
-    context.application.create_task(
-        _delete_later(context.bot, message.chat_id, message.message_id),
-        name=f"delete-temporary-{message.message_id}",
-    )
-    return message
-
-
-async def _send_temporary_photo(update: Update, context: ContextTypes.DEFAULT_TYPE, photo, caption: str):
-    message = await update.effective_message.reply_photo(photo=photo, caption=caption)
-    context.application.create_task(
-        _delete_later(context.bot, message.chat_id, message.message_id),
-        name=f"delete-temporary-photo-{message.message_id}",
-    )
-    return message
-
-
+    asyncio.create_task(_delete_later(context.bot, message.chat_id, message.message_id))
 
 
 async def _authorized(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -62,113 +55,54 @@ async def _authorized(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
 def _account_text() -> str:
     acct = runtime.account
     return (
-        "حساب دمو\n"
+        "💰 حساب دمو\n"
         f"موجودی اولیه: {acct.initial_balance:.2f} USDT\n"
-        f"موجودی: {float(acct.balance or 0):.2f} USDT\n"
-        f"مارجین هر معامله: {acct.margin_per_trade:.2f} USDT\n"
-        f"اهرم: {acct.leverage:g}x\n"
-        f"ارزش اسمی هر معامله: {acct.notional:.2f} USDT\n"
+        f"موجودی فعلی: {float(acct.balance or 0):.2f} USDT\n"
+        "ریسک هر معامله: ۱٪ سرمایه بر اساس فاصله حدضرر\n"
+        f"اهرم محاسباتی: {acct.leverage:g}x\n"
         f"مارجین مصرف‌شده: {acct.margin_used:.2f} USDT\n"
         f"مارجین آزاد: {acct.free_margin:.2f} USDT\n"
         f"معاملات باز: {len(acct.open_positions)}\n"
-        "معاملات واقعی: غیرفعال"
+        "معاملات واقعی: خاموش"
     )
-
-
-def _strategy_text() -> str:
-    cfg = runtime.strategy_config or StrategyConfig()
-    labels = {
-        "pivot4": "پیوت ۴ساعته", "body_len": "میانگین بدنه کندل ۴ساعته",
-        "ob_search": "جستجوی کندل اردربلاک", "max_stored_ob": "حداکثر OB ذخیره",
-        "ob_atr_len": "دوره ATR کیفیت OB", "min_bos_body_atr": "حداقل بدنه BOS/ATR",
-        "min_bos_body_avg": "حداقل بدنه BOS/میانگین", "min_break_atr": "حداقل فاصله شکست/ATR",
-        "max_ob_candle_range_atr": "حداکثر دامنه کندل OB/ATR",
-        "pivot15": "پیوت ۱۵دقیقه", "max_wait": "حداکثر انتظار CHoCH",
-        "atr_len": "دوره ATR", "use_trend_filter": "فیلتر روند",
-        "require_ob_touch": "الزام برخورد به OB", "use_touch_freshness": "تازگی برخورد",
-        "max_bars_since_touch": "حداکثر کندل از برخورد", "use_choch_filter": "فیلتر CHoCH",
-        "use_choch_strength": "قدرت CHoCH", "min_choch_body_atr": "حداقل بدنه CHoCH/ATR",
-        "use_retest_filter": "فیلتر Retest", "retest_atr": "تلورانس Retest/ATR",
-        "use_confirm_candle": "کندل تأیید", "use_confirm_strength": "قدرت کندل تأیید",
-        "min_confirm_body_atr": "حداقل بدنه تأیید/ATR",
-        "enable_trendline_signals": "فعال‌بودن سیگنال خط روند",
-        "use_sma200_trendline_filter": "فیلتر SMA200 خط روند",
-        "require_trendline_pullback": "الزام پولبک خط روند",
-        "trendline_retest_atr": "تلورانس پولبک خط روند/ATR",
-        "trendline_pullback_max_wait": "مهلت پولبک خط روند",
-        "risk_percent": "ریسک سرمایه درصد", "risk_reward": "نسبت ریسک به سود",
-        "sl_buffer_atr": "بافر حدضرر/ATR",
-        "use_ob_boundary_sl": "حدضرر مرز OB", "sma_length": "دوره SMA",
-        "use_sma200_filter": "فیلتر SMA200 اردربلاک", "use_trailing_stop": "تریلینگ استاپ",
-        "trailing_atr_mult": "ضریب تریلینگ", "min_tick": "حداقل گام قیمت",
-    }
-    lines = ["⚙️ تنظیمات استراتژی", "مسیر اول: برخورد به اردربلاک ۴ساعته + تغییر روند و پولبک ۱۵دقیقه‌ای", "مسیر دوم: شکست خط روند ۱۵دقیقه‌ای + پولبک و تأیید", "محدوده مرجع: اردربلاک ۴ساعته"]
-    for key, value in asdict(cfg).items():
-        shown = "روشن" if value is True else "خاموش" if value is False else str(value)
-        lines.append(f"{labels.get(key, key)}: {shown}")
-    lines.append("\nتایم‌فریم مرجع: 4H | تایم‌فریم صدور هر دو نوع سیگنال: 15m")
-    lines.append("توجه: این خروجی مقادیر پیش‌فرض موتور استراتژی را نشان می‌دهد.")
-    return "\n".join(lines)
-
-
-MAIN_MENU = ReplyKeyboardMarkup(
-    [
-        ["/status", "/demo"],
-        ["/open", "/stats"],
-        ["/panel", "/history"],
-        ["/panel", "/history"],
-        ["مدیریت ارزها", "تنظیمات استراتژی"],
-        ["/help", "/menu"],
-    ],
-    resize_keyboard=True,
-    is_persistent=True,
-    input_field_placeholder="یک بخش را انتخاب کن...",
-)
 
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _authorized(update, context):
-        return
-    await _reply_temporary(update, context, 
-        "🏠 منوی اصلی ربات\nبرای افزودن ارز: /add BTC | برای حذف: /remove BTC",
-        reply_markup=MAIN_MENU,
-    )
+    if await _authorized(update, context):
+        await _reply_temporary(update, context, "🏠 منوی اصلی\nبخش موردنظر را انتخاب کن.", reply_markup=MAIN_MENU)
 
 
 async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized(update, context):
         return
     text = (update.effective_message.text or "").strip()
-    if text == "مدیریت ارزها":
-        answer = "🪙 مدیریت ارزها\n/pairs فهرست ارزها\n/auto_pairs وضعیت انتخاب خودکار\n/add BTC افزودن ارز\n/remove BTC حذف ارز دستی"
-    elif text == "تنظیمات استراتژی":
-        answer = "⚙️ تنظیمات استراتژی\n/strategy نمایش همه تنظیمات\n/enable trend روشن کردن فیلتر روند ۴ساعته OB\n/enable trendline فعال‌کردن سیگنال خط روند\n/disable trendline غیرفعال‌کردن سیگنال خط روند\n/enable trendline_pullback الزام پولبک خط روند\n/set pivot4 4 تغییر مقدار عددی\n/reset_strategy بازنشانی تنظیمات"
+    if text == "🥇 همه اطلاعات طلا":
+        await gold_status(update, context)
     else:
-        answer = "برای استفاده از منو، یکی از دکمه‌ها را انتخاب کن یا /menu را بفرست."
-    await _reply_temporary(update, context, answer, reply_markup=MAIN_MENU)
+        await _reply_temporary(update, context, "برای استفاده از ربات یکی از دکمه‌ها یا دستورهای منو را انتخاب کن.", reply_markup=MAIN_MENU)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _authorized(update, context):
-        return
-    await _reply_temporary(update, context, 
-        "ربات سیگنال اردربلاک آماده است. این نسخه فقط حساب دمو دارد.\n"
-        "از دکمه‌های پایین برای دسترسی به بخش‌ها استفاده کن.",
-        reply_markup=MAIN_MENU,
-    )
+    if await _authorized(update, context):
+        await _reply_temporary(
+            update, context,
+            "ربات آماده است. بخش‌های فعال: استراتژی اصلی WEEX، حساب دمو و تحلیل طلای ۱۸ عیار.\n"
+            "برای افزودن ارز: /add BTCUSDT | فهرست: /symbols | حذف: /remove BTCUSDT\n"
+            "ورودها مستقیم و فقط در حساب دمو هستند؛ معامله واقعی خاموش است.",
+            reply_markup=MAIN_MENU,
+        )
 
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _authorized(update, context):
-        return
-    last_scan = runtime.last_scan_at.isoformat() if runtime.last_scan_at else "هنوز اجرا نشده"
-    await _reply_temporary(update, context, 
-        f"وضعیت: {runtime.scanner_state}\n"
-        f"آخرین اسکن: {last_scan}\n"
-        f"تعداد نمادهای انتخاب‌شده: {len(runtime.selected_symbols)}\n"
-        f"تعداد سیگنال‌ها: {runtime.signal_count}\n"
-        "حالت: فقط دمو"
-    )
+    if await _authorized(update, context):
+        await _reply_temporary(
+            update, context,
+            "وضعیت ربات: فعال\n"
+            "تحلیل طلا: " + ("فعال" if runtime.gold_market is not None else "در انتظار کلید API") + "\n"
+            "حساب دمو: فعال\n"
+            f"اسکن WEEX: {runtime.scanner_state} | نمادهای دستی: {len(runtime.manual_symbols)}\n"
+            "معاملات واقعی: خاموش",
+        )
 
 
 async def demo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -183,11 +117,11 @@ async def open_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not positions:
         await _reply_temporary(update, context, "در حال حاضر معامله دمو بازی وجود ندارد.")
         return
-    lines = ["معاملات دمو باز:"]
+    lines = ["📂 معاملات باز دمو:"]
     for p in positions:
         lines.append(
             f"{p.symbol} | {p.side.value}\n"
-            f"ورود: {p.entry:g} | زمان ورود: {p.opened_at or 'نامشخص'}\nاستاپ فعلی: {p.stop:g}\n"
+            f"ورود: {p.entry:g} | حد ضرر: {p.stop:g}\n"
             f"TP1: {p.tp1:g} | TP2: {p.tp2:g} | TP3: {p.tp3:g}"
         )
     await _reply_temporary(update, context, "\n\n".join(lines))
@@ -199,99 +133,17 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     acct = runtime.account
     realized = sum(p.realized_pnl for p in acct.positions.values())
     closed = sum(1 for p in acct.positions.values() if p.closed)
-    await _reply_temporary(update, context, 
-        f"آمار حساب دمو\nموجودی فعلی: {float(acct.balance or 0):.2f} USDT\n"
-        f"سود/زیان ثبت‌شده معاملات: {realized:+.4f} USDT\n"
-        f"معاملات بسته‌شده: {closed}\nمعاملات باز: {len(acct.open_positions)}"
+    await _reply_temporary(
+        update, context,
+        f"📊 آمار حساب دمو\nموجودی: {float(acct.balance or 0):.2f} USDT\n"
+        f"سود/زیان تحقق‌یافته: {realized:+.4f} USDT\n"
+        f"معاملات بسته‌شده: {closed}\nمعاملات باز: {len(acct.open_positions)}",
     )
-
-
-
-def _demo_panel_text() -> str:
-    acct = runtime.account
-    positions = list(acct.positions.values())
-    closed = [p for p in positions if p.closed]
-    wins = sum(1 for p in closed if p.realized_pnl > 0)
-    losses = sum(1 for p in closed if p.realized_pnl < 0)
-    breakeven = len(closed) - wins - losses
-    realized = sum(p.realized_pnl for p in positions)
-    win_rate = (wins / len(closed) * 100.0) if closed else 0.0
-    pnl_pct = (realized / acct.initial_balance * 100.0) if acct.initial_balance else 0.0
-    return (
-        "📊 پنل حرفه‌ای حساب دمو\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        f"💰 موجودی اولیه: {acct.initial_balance:.2f} USDT\n"
-        f"💵 موجودی فعلی: {float(acct.balance or 0):.2f} USDT\n"
-        f"📈 سود/زیان تحقق‌یافته: {realized:+.4f} USDT ({pnl_pct:+.2f}%)\n"
-        f"🎯 درصد معاملات برنده: {win_rate:.1f}%\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        f"🟢 معاملات سودده: {wins}\n🔴 معاملات زیان‌ده: {losses}\n"
-        f"⚪ سربه‌سر: {breakeven}\n"
-        f"📂 معاملات باز: {len(acct.open_positions)}\n"
-        f"📁 معاملات بسته: {len(closed)}\n"
-        f"🔒 مارجین مصرف‌شده: {acct.margin_used:.2f} USDT\n"
-        f"🆓 مارجین آزاد: {acct.free_margin:.2f} USDT\n"
-        f"⚙️ اندازه هر معامله: {acct.notional:.2f} USDT | اهرم: {acct.leverage:g}x\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "حساب آزمایشی است؛ معاملات واقعی غیرفعال."
-    )
-
-
-def _demo_equity_chart() -> BytesIO:
-    acct = runtime.account
-    events = sorted(runtime.closed_trade_events, key=lambda e: str(e.get("time", "")))
-    balance = float(acct.initial_balance)
-    points = [balance]
-    last_realized_by_symbol = {}
-    opened = set()
-    for event in events:
-        symbol = str(event.get("symbol", ""))
-        kind = str(event.get("type", ""))
-        if kind == "OPEN":
-            balance -= acct.notional * acct.fee_rate
-            last_realized_by_symbol[symbol] = 0.0
-            opened.add(symbol)
-            points.append(balance)
-        elif symbol:
-            current = float(event.get("realized_pnl", 0.0) or 0.0)
-            previous = last_realized_by_symbol.get(symbol, 0.0)
-            balance += current - previous
-            last_realized_by_symbol[symbol] = current
-            points.append(balance)
-    if len(points) == 1:
-        points.append(float(acct.balance or acct.initial_balance))
-    width, height = 1000, 480
-    image = Image.new("RGB", (width, height), "#101820")
-    draw = ImageDraw.Draw(image)
-    draw.text((40, 24), "DEMO ACCOUNT EQUITY", fill="#ffffff")
-    draw.text((40, 54), f"Initial: {acct.initial_balance:.2f} USDT   Current: {float(acct.balance or 0):.2f} USDT", fill="#b8c7d9")
-    left, right, top, bottom = 70, 950, 110, 410
-    lo, hi = min(points), max(points)
-    pad = max((hi - lo) * 0.15, abs(hi) * 0.002, 0.01)
-    lo -= pad
-    hi += pad
-    def xy(index, value):
-        x = left + (right-left) * index / max(1, len(points)-1)
-        y = bottom - (value-lo) / (hi-lo) * (bottom-top)
-        return int(x), int(y)
-    draw.line((left, bottom, right, bottom), fill="#526273", width=1)
-    coords = [xy(i, value) for i, value in enumerate(points)]
-    if len(coords) > 1:
-        draw.line(coords, fill="#28c98b", width=4)
-    for x, y in coords:
-        draw.ellipse((x-4, y-4, x+4, y+4), fill="#28c98b")
-    draw.text((left, top-25), f"{hi:.2f}", fill="#b8c7d9")
-    draw.text((left, bottom+10), f"{lo:.2f} USDT", fill="#b8c7d9")
-    out = BytesIO()
-    image.save(out, format="PNG", optimize=True)
-    out.seek(0)
-    return out
 
 
 async def demo_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _authorized(update, context):
-        return
-    await _send_temporary_photo(update, context, _demo_equity_chart(), _demo_panel_text())
+    if await _authorized(update, context):
+        await _reply_temporary(update, context, "📈 پنل حساب دمو\n\n" + _account_text())
 
 
 async def trade_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -302,10 +154,10 @@ async def trade_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await _reply_temporary(update, context, "📜 هنوز معامله‌ای در حساب دمو ثبت نشده است.")
         return
     lines = ["📜 تاریخچه معاملات دمو"]
-    for p in positions[:15]:
+    for p in positions[:20]:
         state = "باز" if not p.closed else ("سود" if p.realized_pnl > 0 else "زیان" if p.realized_pnl < 0 else "سربه‌سر")
         lines.append(
-            f"\n{p.symbol} | {'خرید' if p.side.value == 'LONG' else 'فروش'} | {state}\n"
+            f"\n{p.symbol} | {p.side.value} | {state}\n"
             f"ورود: {p.entry:g} | حدضرر اولیه: {p.initial_stop:g}\n"
             f"TP1: {p.tp1:g} | TP2: {p.tp2:g} | TP3: {p.tp3:g}\n"
             f"سود/زیان تحقق‌یافته: {p.realized_pnl:+.4f} USDT\n"
@@ -314,226 +166,89 @@ async def trade_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await _reply_temporary(update, context, "\n".join(lines))
 
 
-async def pairs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def list_symbols(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized(update, context):
         return
-    manual = sorted(runtime.manual_symbols)
-    lines = [
-        "📋 فهرست ارزهای ربات",
-        "حالت اسکن: فقط ارزهای دستی",
-        f"ارزهای واجد شرایط فعلی اسکن: {len(runtime.selected_symbols)}",
-        f"افزوده‌شده دستی: {len(manual)}",
-        "",
-        "ارزهای در حال اسکن:",
-    ]
-    lines.extend(runtime.selected_symbols or ["فعلاً هیچ ارزی واجد شرایط OB نیست."])
-    lines.extend(["", "فهرست دستی:"])
-    lines.extend(manual or ["موردی اضافه نشده است."])
-    text = "\n".join(lines)
-    for start in range(0, len(text), 3800):
-        await _reply_temporary(update, context, text[start:start + 3800])
+    symbols = runtime.manual_symbols
+    text = "📋 نمادهای دستی برای اسکن:\n" + ("\n".join(symbols) if symbols else "هنوز نمادی اضافه نشده است.")
+    await _reply_temporary(update, context, text)
 
 
-async def add_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def add_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized(update, context):
         return
     if not context.args:
-        await _reply_temporary(update, context, "نماد را وارد کن. مثال: /add BTC یا /add BTC/USDT")
+        await _reply_temporary(update, context, "نمونه: /add BTCUSDT")
         return
-    try:
-        candidate = await __import__("asyncio").to_thread(
-            _resolve_symbol, " ".join(context.args)
-        )
-        symbol = candidate.symbol
-        if symbol in runtime.manual_symbols:
-            await _reply_temporary(update, context, f"{symbol} از قبل در فهرست دستی است.")
-            return
-        runtime.manual_symbols.append(symbol)
-        if runtime.storage is not None:
-            runtime.storage.save_manual_symbols(runtime.manual_symbols)
-        await _reply_temporary(update, context, 
-            f"✅ {symbol} به فهرست دستی اضافه شد. در اسکن بعدی بررسی می‌شود؛ "
-            "فقط در صورت داشتن اردربلاک معتبر وارد اسکن ۱۵ دقیقه‌ای خواهد شد."
-        )
-    except Exception as exc:
-        await _reply_temporary(update, context, f"❌ افزودن ارز انجام نشد: {exc}")
-
-
-async def remove_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _authorized(update, context):
-        return
-    if not context.args:
-        await _reply_temporary(update, context, "مثال: /remove BTC یا /remove BTC/USDT")
-        return
-    requested = " ".join(context.args).strip().upper().replace("-", "/").replace(" ", "")
-    if "/" in requested:
-        base, quote_part = requested.split("/", 1)
-        quote = quote_part.split(":", 1)[0]
-        if quote and quote != "USDT":
-            await _reply_temporary(update, context, "فقط نمادهای قرارداد USDT را می‌توان حذف کرد.")
-            return
-    else:
-        base = requested[:-4] if requested.endswith("USDT") and len(requested) > 4 else requested
-    matched = next(
-        (symbol for symbol in runtime.manual_symbols
-         if symbol.split("/", 1)[0].upper() == base),
-        None,
-    )
-    if matched is None:
-        await _reply_temporary(update, context, 
-            "این ارز در فهرست دستی نیست. حذف فقط برای ارزهایی انجام می‌شود که خودت اضافه کرده‌ای."
-        )
-        return
-    runtime.manual_symbols.remove(matched)
-    if runtime.storage is not None:
-        runtime.storage.save_manual_symbols(runtime.manual_symbols)
-    await _reply_temporary(update, context, f"🗑 {matched} از فهرست دستی حذف شد.")
-
-
-def _resolve_symbol(requested: str):
-    # Market-data instance is attached by the scanner bootstrap.
     resolver = runtime.market_symbol_resolver
     if resolver is None:
-        raise RuntimeError("اتصال بازار هنوز آماده نیست؛ چند لحظه دیگر تلاش کن.")
-    return resolver(requested)
-
-
-async def auto_pairs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if await _authorized(update, context):
-        await _reply_temporary(update, context, 
-            f"انتخاب خودکار: غیرفعال\nنمادهای دستی: {len(runtime.manual_symbols)}\n"
-            f"نمادهای واجد شرایط فعلی اسکن: {len(runtime.selected_symbols)}\n"
-            "فقط ارزهایی اسکن می‌شوند که خودت با /add اضافه کرده‌ای."
-        )
-
-
-async def strategy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if await _authorized(update, context):
-        await _reply_temporary(update, context, 
-            _strategy_text()
-            + "\n\n/enable trendline یا /disable trendline برای فعال/غیرفعال‌کردن مسیر خط روند"
-            + "\n/enable trendline_sma برای فیلتر SMA200 خط روند"
-            + "\nبرای عددها: /set pivot4 4"
-            + "\nبازنشانی: /reset_strategy"
-        )
-
-
-STRATEGY_ALIASES = {
-    "trend": "use_trend_filter",
-    "trendline": "enable_trendline_signals",
-    "trendline_sma": "use_sma200_trendline_filter",
-    "trendline_pullback": "require_trendline_pullback",
-    "ob_touch": "require_ob_touch",
-    "touch_freshness": "use_touch_freshness",
-    "choch": "use_choch_filter",
-    "choch_strength": "use_choch_strength",
-    "retest": "use_retest_filter",
-    "confirm_candle": "use_confirm_candle",
-    "confirm_strength": "use_confirm_strength",
-    "ob_boundary_sl": "use_ob_boundary_sl",
-    "sma200": "use_sma200_filter",
-    "trailing": "use_trailing_stop",
-}
-
-
-def _save_strategy_config(config: StrategyConfig) -> None:
-    runtime.strategy_config = config
-    if runtime.storage is not None:
-        runtime.storage.save_strategy_config(config)
-
-
-async def set_strategy_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _authorized(update, context):
+        await _reply_temporary(update, context, "اتصال داده بازار هنوز آماده نیست؛ کمی بعد دوباره تلاش کن.")
         return
-    if len(context.args) != 2:
-        await _reply_temporary(update, context, 
-            "فرمت: /set نام_تنظیم مقدار\nمثال: /set pivot4 4\n"
-            "برای روشن/خاموش کردن از /enable و /disable استفاده کن."
-        )
-        return
-    key = STRATEGY_ALIASES.get(context.args[0].lower(), context.args[0].lower())
-    values = asdict(runtime.strategy_config or StrategyConfig())
-    if key not in values:
-        await _reply_temporary(update, context, "نام تنظیم پیدا نشد. برای دیدن نام‌ها /strategy را بفرست.")
-        return
-    current = values[key]
-    if isinstance(current, bool):
-        await _reply_temporary(update, context, "این گزینه روشن/خاموش است؛ از /enable یا /disable استفاده کن.")
-        return
+    requested = context.args[0]
     try:
-        value = int(context.args[1]) if isinstance(current, int) else float(context.args[1])
-        if isinstance(value, float) and not __import__("math").isfinite(value):
-            raise ValueError("عدد باید معتبر باشد.")
-        values[key] = value
-        updated = StrategyConfig(**values)
-        if key in {"min_choch_body_atr", "min_confirm_body_atr", "sl_buffer_atr"} and not 0 <= value <= 5:
-            raise ValueError("مقدار باید بین 0 تا 5 باشد.")
-        if key in {"retest_atr"} and not 0 <= value <= 5:
-            raise ValueError("مقدار باید بین 0 تا 5 باشد.")
-        if key in {"break_even_trigger_r", "trailing_atr_mult"} and not 0 < value <= 20:
-            raise ValueError("مقدار باید بیشتر از صفر و حداکثر 20 باشد.")
-        if key == "min_tick" and value <= 0:
-            raise ValueError("min_tick باید بیشتر از صفر باشد.")
-        _save_strategy_config(updated)
-        await _reply_temporary(update, context, f"✅ {key} روی {value} تنظیم شد و از اسکن بعدی اعمال می‌شود.")
-    except (TypeError, ValueError) as exc:
-        await _reply_temporary(update, context, f"❌ مقدار نامعتبر است: {exc}")
+        market = await asyncio.to_thread(resolver.resolve_manual_symbol, requested)
+    except Exception as exc:
+        await _reply_temporary(update, context, f"نماد معتبر یا فعال در WEEX پیدا نشد: {exc}")
+        return
+    canonical = market.symbol
+    if canonical not in runtime.manual_symbols:
+        runtime.manual_symbols.append(canonical)
+        runtime.manual_symbols.sort()
+        if runtime.storage is not None:
+            runtime.storage.save_manual_symbols(runtime.manual_symbols)
+    await _reply_temporary(update, context, f"✅ {canonical} به فهرست دستی اضافه شد. اسکن فقط روی نمادهای همین فهرست انجام می‌شود.")
 
 
-async def toggle_strategy_value(update: Update, context: ContextTypes.DEFAULT_TYPE, enabled: bool) -> None:
+async def remove_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized(update, context):
         return
-    if len(context.args) != 1:
-        await _reply_temporary(update, context, 
-            "نام گزینه را وارد کن. مثال: /enable trendline یا /disable trendline_pullback"
-        )
+    if not context.args:
+        await _reply_temporary(update, context, "نمونه: /remove BTCUSDT")
         return
-    key = STRATEGY_ALIASES.get(context.args[0].lower(), context.args[0].lower())
-    values = asdict(runtime.strategy_config or StrategyConfig())
-    if key not in values or not isinstance(values[key], bool):
-        await _reply_temporary(update, context, 
-            "گزینه روشن/خاموش پیدا نشد. نام‌های کوتاه: trend, trendline, trendline_sma, trendline_pullback, "
-            "ob_touch, choch, retest, confirm_candle, sma200, trailing"
-        )
-        return
-    if key == "require_trendline_pullback" and not enabled:
-        await _reply_temporary(update, context, "پولبک خط روند در Pine اصلی اجباری است و نمی‌توان آن را خاموش کرد.")
-        return
-    values[key] = enabled
-    _save_strategy_config(StrategyConfig(**values))
-    state = "روشن" if enabled else "خاموش"
-    await _reply_temporary(update, context, f"✅ {key}: {state}؛ از اسکن بعدی اعمال می‌شود.")
+    requested = context.args[0].strip().upper().replace("-", "/").replace(" ", "")
+    resolver = runtime.market_symbol_resolver
+    canonical = None
+    if resolver is not None:
+        try:
+            market = await asyncio.to_thread(resolver.resolve_manual_symbol, requested)
+            canonical = market.symbol
+        except Exception:
+            pass
+    before = len(runtime.manual_symbols)
+    runtime.manual_symbols = [symbol for symbol in runtime.manual_symbols if symbol.upper() != requested and (canonical is None or symbol != canonical)]
+    if runtime.storage is not None:
+        runtime.storage.save_manual_symbols(runtime.manual_symbols)
+    if len(runtime.manual_symbols) == before:
+        await _reply_temporary(update, context, "این نماد در فهرست دستی نبود.")
+    else:
+        await _reply_temporary(update, context, "نماد از فهرست اسکن حذف شد. سابقه و معاملات دمو پاک نشدند.")
 
-
-async def enable_strategy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await toggle_strategy_value(update, context, True)
-
-
-async def disable_strategy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await toggle_strategy_value(update, context, False)
-
-
-async def reset_strategy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def gold_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized(update, context):
         return
-    config = StrategyConfig()
-    _save_strategy_config(config)
-    await _reply_temporary(update, context, "تنظیمات استراتژی به پیش‌فرض کد بازگشت و ذخیره شد.")
+    service = runtime.gold_market
+    if service is None:
+        await _reply_temporary(
+            update, context,
+            "🥇 تحلیل طلای ۱۸ عیار هنوز فعال نشده است.\n"
+            "برای فعال‌سازی، کلید TALASANJ_API_KEY را در متغیرهای خصوصی HOKAS ثبت کن.\n"
+            "کلید API را در چت ارسال نکن.",
+        )
+        return
+    await _reply_temporary(update, context, service.status_text())
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _authorized(update, context):
-        return
-    await _reply_temporary(update, context, 
-        "/start - شروع\n/status - وضعیت ربات\n/demo - موجودی دمو\n"
-        "/open - معاملات باز\n/panel - پنل حرفه‌ای حساب دمو\n/history - تاریخچه معاملات\n/pairs - فهرست ارزها\n/add BTC - افزودن ارز دستی\n"
-        "/remove BTC - حذف ارز دستی\n/auto_pairs - وضعیت انتخاب خودکار\n/stats - آمار حساب\n"
-        "/strategy - نمایش تنظیمات\n/set pivot4 4 - تغییر عدد\n"
-        "/enable trendline - فعال‌کردن سیگنال خط روند\n/disable trendline - غیرفعال‌کردن آن\n"
-        "/enable trendline_sma - فیلتر SMA200 خط روند\n"
-        "/enable trendline_pullback - الزام پولبک خط روند\n"
-        "/enable sma200 - فیلتر SMA200 اردربلاک\n/reset_strategy - بازنشانی\n/help - راهنما"
-    )
+    if await _authorized(update, context):
+        await _reply_temporary(
+            update, context,
+            "/start - شروع\n/status - وضعیت ربات\n/gold - وضعیت تحلیل طلای ۱۸ عیار\n"
+            "/demo - موجودی حساب دمو\n/open - معاملات باز دمو\n/stats - آمار دمو\n"
+            "/panel - پنل حساب دمو\n/history - تاریخچه دمو\n"
+            "/add نماد - افزودن نماد دستی\n/remove نماد - حذف نماد\n/symbols - فهرست نمادها\n"
+            "/menu - منوی اصلی\n/help - راهنما",
+            reply_markup=MAIN_MENU,
+        )
 
 
 def build_telegram_application(token: str, allowed_chat_id: str) -> Application:
@@ -542,9 +257,10 @@ def build_telegram_application(token: str, allowed_chat_id: str) -> Application:
     application = ApplicationBuilder().token(token).build()
     application.bot_data["allowed_chat_id"] = allowed_chat_id
     for command, callback in (
-        ("start", start), ("menu", menu), ("status", status), ("demo", demo),
-        ("open", open_positions), ("panel", demo_panel), ("history", trade_history), ("pairs", pairs), ("add", add_pair), ("remove", remove_pair), ("auto_pairs", auto_pairs), ("stats", stats), ("strategy", strategy),
-        ("set", set_strategy_value), ("enable", enable_strategy), ("disable", disable_strategy), ("reset_strategy", reset_strategy), ("help", help_command),
+        ("start", start), ("menu", menu), ("status", status), ("gold", gold_status),
+        ("demo", demo), ("open", open_positions), ("panel", demo_panel),
+        ("history", trade_history), ("stats", stats), ("help", help_command),
+        ("add", add_symbol), ("remove", remove_symbol), ("symbols", list_symbols),
     ):
         application.add_handler(CommandHandler(command, callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_router))
