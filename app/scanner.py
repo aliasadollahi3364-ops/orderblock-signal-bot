@@ -85,8 +85,8 @@ def _ordered_feed(engine: OrderBlockStrategy, bars4: list[Candle],
     return latest_signal if latest_signal.timestamp == completed_15m[-1].timestamp else None
 
 
-def _active_ob_distance(engine: OrderBlockStrategy, price: float, *, include_used: bool = False) -> float | None:
-    zones = [ob for ob in engine.order_blocks if ob.active and (include_used or not ob.used)]
+def _active_ob_distance(engine: OrderBlockStrategy, price: float) -> float | None:
+    zones = [ob for ob in engine.order_blocks if ob.active and not ob.used]
     if not zones:
         return None
 
@@ -310,7 +310,7 @@ class AutomaticScanner:
                 last_price = market.last_price
                 if last_price is None or last_price <= 0:
                     continue
-                distance = _active_ob_distance(htf_engine, last_price, include_used=True)
+                distance = _active_ob_distance(htf_engine, last_price)
                 if distance is None:
                     continue
                 score = market.rank_score / (1.0 + distance * 100.0)
