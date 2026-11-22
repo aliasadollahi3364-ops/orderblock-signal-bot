@@ -86,7 +86,7 @@ def _ordered_feed(engine: OrderBlockStrategy, bars4: list[Candle],
 
 
 def _active_ob_distance(engine: OrderBlockStrategy, price: float) -> float | None:
-    zones = [ob for ob in engine.order_blocks if ob.active and not ob.used]
+    zones = [ob for ob in engine.order_blocks if ob.active]
     if not zones:
         return None
 
