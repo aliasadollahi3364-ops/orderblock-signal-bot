@@ -74,6 +74,48 @@ def test_two_limit_fills_use_one_average_entry_and_shared_targets():
     assert position.stop == pytest.approx(expected_entry)
     assert position.quantity_remaining == pytest.approx(position.quantity_initial * 0.67)
 
+def test_pine_risk_sized_entry_uses_three_targets_and_partial_exits():
+    account = DemoAccount(fee_rate=0)
+    position = account.open_position(
+        "BTC/USDT", Side.LONG, 100.0, 98.0,
+        risk_percent=1.0, risk_reward=2.5,
+    )
+
+    # 1% of 100 USDT is 1 USDT risk; 2 USDT price risk gives 0.5 BTC.
+    assert position.quantity_initial == pytest.approx(0.5)
+    assert account.margin_used == pytest.approx(10.0)
+    assert position.tp1 == pytest.approx(102.0)
+    assert position.tp2 == pytest.approx(104.0)
+    assert position.tp3 == pytest.approx(105.0)
+    assert position.single_target is False
+
+    events = account.process_candle(high=102.1, low=101.0, symbol="BTC/USDT")
+    assert [event["type"] for event in events] == ["TP1"]
+    assert position.quantity_remaining == pytest.approx(position.quantity_initial * 0.67)
+    assert position.stop == pytest.approx(100.0)
+
+    events = account.process_candle(high=104.1, low=102.1, symbol="BTC/USDT")
+    assert [event["type"] for event in events] == ["TP2"]
+    assert position.quantity_remaining == pytest.approx(position.quantity_initial * 0.34)
+    assert position.stop == pytest.approx(102.0)
+
+    events = account.process_candle(high=105.1, low=104.1, symbol="BTC/USDT")
+    assert [event["type"] for event in events] == ["TP3"]
+    assert position.closed is True
+    assert position.quantity_remaining == pytest.approx(0.0)
+
+
+def test_pine_risk_sized_short_targets_are_below_entry():
+    account = DemoAccount(fee_rate=0)
+    position = account.open_position(
+        "ETH/USDT", Side.SHORT, 100.0, 102.0,
+        risk_percent=1.0, risk_reward=2.5,
+    )
+    assert position.tp1 == pytest.approx(98.0)
+    assert position.tp2 == pytest.approx(96.0)
+    assert position.tp3 == pytest.approx(95.0)
+
+
 def test_tp1_and_tp2_move_stop_as_agreed():
     account = DemoAccount(fee_rate=0)
     position = account.open_position("BTC/USDT", Side.LONG, 100.0, 98.0)
