@@ -221,20 +221,25 @@ def test_new_limit_entry_candle_still_honors_stop_conservatively():
     assert [event["type"] for event in events] == ["STOP"]
     assert position.closed is True
 
-def test_both_long_limits_filled_in_one_candle_aggregate_to_one_position():
+def test_both_long_limits_touched_in_one_candle_fill_sequentially():
     from app.demo import DemoAccount, Side
 
     book = PendingLimitBook()
     candidate = setup("BUY")
     book.add(candidate)
-    events = book.process_candle("BTC/USDT", 900_000, 105.0, 100.0, 102.0)
-    assert [(event.leg_number, event.status) for event in events] == [
-        (1, "FILLED"), (2, "FILLED")
-    ]
+
+    # A single OHLC range spans both prices, but only the nearer leg may fill.
+    first = book.process_candle("BTC/USDT", 900_000, 105.0, 100.0, 102.0)
+    assert [(event.leg_number, event.status) for event in first] == [(1, "FILLED")]
+    assert candidate.limits[1].status is PendingStatus.PENDING
+
+    # The deeper leg can fill only when a later candle touches it again.
+    second = book.process_candle("BTC/USDT", 1_800_000, 102.0, 100.0, 101.0)
+    assert [(event.leg_number, event.status) for event in second] == [(2, "FILLED")]
 
     account = DemoAccount()
     position = None
-    for event in events:
+    for event in first + second:
         position = account.add_limit_fill(
             event.symbol, Side.LONG, event.price, candidate.stop,
             opened_at="2026-01-01T00:15:00+00:00",
@@ -249,6 +254,17 @@ def test_both_long_limits_filled_in_one_candle_aggregate_to_one_position():
     assert len(account.open_positions) == 1
 
 
+def test_both_short_limits_touched_in_one_candle_fill_sequentially():
+    book = PendingLimitBook()
+    candidate = setup("SELL")
+    book.add(candidate)
+
+    first = book.process_candle("ETH/USDT", 900_000, 110.0, 105.0, 108.0)
+    assert [(event.leg_number, event.status) for event in first] == [(1, "FILLED")]
+    assert candidate.limits[1].status is PendingStatus.PENDING
+
+    second = book.process_candle("ETH/USDT", 1_800_000, 110.0, 108.0, 109.0)
+    assert [(event.leg_number, event.status) for event in second] == [(2, "FILLED")]
 def test_two_short_limit_fills_on_separate_candles_share_one_position():
     from app.demo import DemoAccount, Side
 

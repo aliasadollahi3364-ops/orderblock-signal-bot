@@ -210,6 +210,9 @@ class PendingLimitBook:
                                                 "CANCELLED", leg.price, timestamp, reason))
             return events
 
+        # OHLC candles do not reveal the intrabar path. If both prices lie
+        # inside one candle, accept only the nearer first leg; the deeper leg
+        # can fill only on a later candle that touches it again.
         for leg in setup.limits:
             if leg.status is not PendingStatus.PENDING:
                 continue
@@ -219,6 +222,7 @@ class PendingLimitBook:
                 leg.filled_at = timestamp
                 events.append(PendingEvent(symbol, setup.side, leg.number,
                                             "FILLED", leg.price, timestamp))
+                break
         return events
 
     def cancel(self, symbol: str, timestamp: int, reason: str) -> list[PendingEvent]:
