@@ -155,7 +155,7 @@ async def main() -> None:
     # Crypto scanning and pending crypto limit setups are intentionally disabled.
     # Saving the demo snapshot also clears any obsolete pending-limit records.
     runtime.pending_limits.setups.clear()
-    runtime.manual_symbols = []
+    # Preserve the user's manually selected crypto symbols for the next strategy.
     runtime.selected_symbols = []
     runtime.signal_count = 0
     runtime.scanner_state = "DISABLED_BY_RESET"
