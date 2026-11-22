@@ -65,7 +65,6 @@ class StrategyConfig:
     min_tick: float = 0.00000001
     enable_rsi_divergence: bool = True
     rsi_length: int = 14
-    rsi_divergence_pivot_length: int | None = None
     rsi_divergence_lookback: int = 20
 
     def __post_init__(self) -> None:
@@ -75,8 +74,6 @@ class StrategyConfig:
                      "rsi_length", "rsi_divergence_lookback"):
             if getattr(self, name) < 1:
                 raise ValueError(f"{name} must be positive")
-        if self.rsi_divergence_pivot_length is not None and self.rsi_divergence_pivot_length < 1:
-            raise ValueError("rsi_divergence_pivot_length must be positive when set")
         if self.min_tick <= 0:
             raise ValueError("min_tick must be positive")
 
@@ -176,8 +173,6 @@ class OrderBlockStrategy:
         self._short_sl: Optional[float] = None
         self._previous_rsi_pivot_low: Optional[float] = None
         self._previous_rsi_pivot_high: Optional[float] = None
-        self._previous_divergence_price_low: Optional[float] = None
-        self._previous_divergence_price_high: Optional[float] = None
         self._bullish_divergence_bar: Optional[int] = None
         self._bearish_divergence_bar: Optional[int] = None
         self._rsi_values: list[Optional[float]] = []
@@ -334,24 +329,19 @@ class OrderBlockStrategy:
         candidate = idx-self.cfg.pivot15
         if candidate >= 0:
             candidate_rsi = self._rsi_values[candidate] if candidate < len(self._rsi_values) else None
-            div_pivot_len = self.cfg.rsi_divergence_pivot_length or self.cfg.pivot15
-            div_candidate = idx-div_pivot_len
-            if self.cfg.enable_rsi_divergence and div_candidate >= 0:
-                candidate_rsi = self._rsi_values[div_candidate] if div_candidate < len(self._rsi_values) else None
-                if candidate_rsi is not None and self._pivot_low(bars, div_candidate, div_pivot_len, div_pivot_len):
-                    if ((self._previous_divergence_price_low is not None or self.last_pl15 is not None) and self._previous_rsi_pivot_low is not None
-                            and bars[div_candidate].low < (self._previous_divergence_price_low if self._previous_divergence_price_low is not None else self.last_pl15)
+            if self.cfg.enable_rsi_divergence and candidate_rsi is not None:
+                if self._pivot_low(bars, candidate, self.cfg.pivot15, self.cfg.pivot15):
+                    if (self.last_pl15 is not None and self._previous_rsi_pivot_low is not None
+                            and bars[candidate].low < self.last_pl15
                             and candidate_rsi > self._previous_rsi_pivot_low):
                         self._bullish_divergence_bar = idx
                     self._previous_rsi_pivot_low = candidate_rsi
-                    self._previous_divergence_price_low = bars[div_candidate].low
-                if candidate_rsi is not None and self._pivot_high(bars, div_candidate, div_pivot_len, div_pivot_len):
-                    if ((self._previous_divergence_price_high is not None or self.last_ph15 is not None) and self._previous_rsi_pivot_high is not None
-                            and bars[div_candidate].high > (self._previous_divergence_price_high if self._previous_divergence_price_high is not None else self.last_ph15)
+                if self._pivot_high(bars, candidate, self.cfg.pivot15, self.cfg.pivot15):
+                    if (self.last_ph15 is not None and self._previous_rsi_pivot_high is not None
+                            and bars[candidate].high > self.last_ph15
                             and candidate_rsi < self._previous_rsi_pivot_high):
                         self._bearish_divergence_bar = idx
                     self._previous_rsi_pivot_high = candidate_rsi
-                    self._previous_divergence_price_high = bars[div_candidate].high
             if self._pivot_high(bars, candidate, self.cfg.pivot15, self.cfg.pivot15):
                 self.prev_ph15, self.prev_ph15_bar = self.last_ph15, self.last_ph15_bar
                 self.last_ph15, self.last_ph15_bar = bars[candidate].high, candidate
@@ -390,7 +380,7 @@ class OrderBlockStrategy:
         short_retest = self._short_pending and self._short_break_bar is not None and idx > self._short_break_bar and candle.high >= self._short_level-tol and candle.low <= self._short_level+tol
         long_confirm = long_retest and candle.close > candle.open and candle.close > self._long_level
         short_confirm = short_retest and candle.close < candle.open and candle.close < self._short_level
-        nearest_ob = self._nearest_touched_ob(candle, include_used=True)
+        nearest_ob = self._nearest_touched_ob(candle, include_used=False)
         nearest_dir = nearest_ob.direction if nearest_ob is not None else 0
         # The supplied Pine source requires a post-break pullback and confirmation.
         # Never emit a trendline signal on the breakout candle alone.
@@ -432,7 +422,7 @@ class OrderBlockStrategy:
                 base = min(self.last_pl15, bottom) if cfg.use_ob_boundary_sl else self.last_pl15
                 stop = base-atr*cfg.sl_buffer_atr
                 if candle.close-stop >= cfg.min_tick:
-                    if cfg.use_sma200_filter and (sma is None or candle.close <= sma): return None
+                    if cfg.use_sma200_filter and (sma is None or candle.close <= sma): continue
                     ob.used = True
                     rsi_state, rsi_value = self._signal_rsi_context("BUY", idx)
                 return Signal(self.symbol, "BUY", candle.timestamp, candle.close, stop, atr,
@@ -442,7 +432,7 @@ class OrderBlockStrategy:
                 base = max(self.last_ph15, top) if cfg.use_ob_boundary_sl else self.last_ph15
                 stop = base+atr*cfg.sl_buffer_atr
                 if stop-candle.close >= cfg.min_tick:
-                    if cfg.use_sma200_filter and (sma is None or candle.close >= sma): return None
+                    if cfg.use_sma200_filter and (sma is None or candle.close >= sma): continue
                     ob.used = True
                     rsi_state, rsi_value = self._signal_rsi_context("SELL", idx)
                 return Signal(self.symbol, "SELL", candle.timestamp, candle.close, stop, atr,
