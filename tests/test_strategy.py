@@ -290,3 +290,33 @@ def test_rsi_divergence_can_be_disabled_without_changing_entry_logic():
 
     assert state == "DISABLED"
     assert value is None
+
+
+def test_order_block_warning_waits_for_choch_and_confirmation_candle():
+    from app.strategy import OrderBlock
+
+    cfg = StrategyConfig(
+        pivot15=1, atr_len=1, require_ob_touch=True,
+        use_touch_freshness=True, use_choch_filter=True,
+        use_choch_strength=False, use_retest_filter=False,
+        use_confirm_candle=True, use_confirm_strength=False,
+        use_ob_boundary_sl=True, use_trend_filter=False,
+        use_sma200_filter=False, min_tick=0.001,
+    )
+    engine = OrderBlockStrategy("BTC/USDT", cfg)
+    engine.last_pl15 = 95.0
+    ob = OrderBlock(
+        direction=1, top=100.0, bottom=98.0, origin_time=123,
+        has_choch=True, choch_level=99.0, choch_bar=-1,
+    )
+    engine.order_blocks.append(ob)
+
+    signal = engine.on_15m_close(bar(1000, 99.5, 101.5, 99.0, 101.0))
+
+    assert signal is not None
+    assert signal.side == "BUY"
+    assert engine.last_early_warning is not None
+    assert engine.last_early_warning.kind == "ORDER_BLOCK_CONFIRMATION"
+    assert engine.last_early_warning.timestamp == 1000
+    assert engine.last_early_warning.ob_top == 100.0
+    assert engine.last_early_warning.ob_bottom == 98.0
