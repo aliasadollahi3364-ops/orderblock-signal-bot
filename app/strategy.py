@@ -174,6 +174,8 @@ class OrderBlockStrategy:
         self._short_sl: Optional[float] = None
         self._previous_rsi_pivot_low: Optional[float] = None
         self._previous_rsi_pivot_high: Optional[float] = None
+        self._previous_divergence_price_low: Optional[float] = None
+        self._previous_divergence_price_high: Optional[float] = None
         self._bullish_divergence_bar: Optional[int] = None
         self._bearish_divergence_bar: Optional[int] = None
         self._rsi_values: list[Optional[float]] = []
@@ -334,17 +336,19 @@ class OrderBlockStrategy:
             if self.cfg.enable_rsi_divergence and div_candidate >= 0:
                 candidate_rsi = self._rsi_values[div_candidate] if div_candidate < len(self._rsi_values) else None
                 if candidate_rsi is not None and self._pivot_low(bars, div_candidate, self.cfg.rsi_divergence_pivot_length, self.cfg.rsi_divergence_pivot_length):
-                    if (self.last_pl15 is not None and self._previous_rsi_pivot_low is not None
-                            and bars[div_candidate].low < self.last_pl15
+                    if (self._previous_divergence_price_low is not None and self._previous_rsi_pivot_low is not None
+                            and bars[div_candidate].low < self._previous_divergence_price_low
                             and candidate_rsi > self._previous_rsi_pivot_low):
                         self._bullish_divergence_bar = div_candidate
                     self._previous_rsi_pivot_low = candidate_rsi
+                    self._previous_divergence_price_low = bars[div_candidate].low
                 if candidate_rsi is not None and self._pivot_high(bars, div_candidate, self.cfg.rsi_divergence_pivot_length, self.cfg.rsi_divergence_pivot_length):
-                    if (self.last_ph15 is not None and self._previous_rsi_pivot_high is not None
-                            and bars[div_candidate].high > self.last_ph15
+                    if (self._previous_divergence_price_high is not None and self._previous_rsi_pivot_high is not None
+                            and bars[div_candidate].high > self._previous_divergence_price_high
                             and candidate_rsi < self._previous_rsi_pivot_high):
                         self._bearish_divergence_bar = div_candidate
                     self._previous_rsi_pivot_high = candidate_rsi
+                    self._previous_divergence_price_high = bars[div_candidate].high
             if self._pivot_high(bars, candidate, self.cfg.pivot15, self.cfg.pivot15):
                 self.prev_ph15, self.prev_ph15_bar = self.last_ph15, self.last_ph15_bar
                 self.last_ph15, self.last_ph15_bar = bars[candidate].high, candidate
