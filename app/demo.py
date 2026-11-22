@@ -108,8 +108,8 @@ class DemoAccount:
                        (entry - risk, entry - 2 * risk, entry - 3 * risk))
             single_target = False
         else:
-            if risk_percent is None or risk_reward is None or not 0 < risk_percent <= 100 or risk_reward <= 0:
-                raise ValueError("Risk percent and risk/reward must be positive.")
+            if risk_percent is None or risk_reward is None or not 0 < risk_percent <= 100 or risk_reward < 2.0:
+                raise ValueError("Three-target demo mode requires positive risk percent and final RR of at least 2.0.")
             risk_cash = self.balance * risk_percent / 100.0
             qty = risk_cash / risk
             notional = qty * entry
@@ -117,10 +117,15 @@ class DemoAccount:
             if self.free_margin < margin:
                 raise ValueError("Insufficient free demo margin for the Pine risk-based position size.")
             fee = notional * self.fee_rate
-            target = (entry + risk * risk_reward if side is Side.LONG
-                      else entry - risk * risk_reward)
-            targets = (target, target, target)
-            single_target = True
+            direction = 1.0 if side is Side.LONG else -1.0
+            targets = (
+                entry + direction * risk,
+                entry + direction * risk * 2.0,
+                entry + direction * risk * risk_reward,
+            )
+            # Pine signal positions now use the same three-stage partial-exit
+            # manager as the demo ledger: 33%, 33%, then the remaining 34%.
+            single_target = False
 
         self.balance -= fee
         position = DemoPosition(
