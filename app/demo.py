@@ -145,6 +145,8 @@ class DemoAccount:
             raise ValueError("Long stop must be below entry.")
         if side is Side.SHORT and stop <= entry:
             raise ValueError("Short stop must be above entry.")
+        if risk_reward < 2.0:
+            raise ValueError("Three-target demo mode requires a final RR of at least 2.0.")
         margin = self.margin_per_trade
         position = self.positions.get(symbol)
         if position is not None and not position.closed:
@@ -165,8 +167,6 @@ class DemoAccount:
             position.quantity_remaining += new_qty
             position.margin_allocated = allocated + margin
             risk = abs(entry - stop)
-            if risk_reward < 2.0:
-                raise ValueError("Three-target demo mode requires a final RR of at least 2.0.")
             direction = 1.0 if side is Side.LONG else -1.0
             targets_for_leg = (
                 entry + direction * risk,
@@ -193,8 +193,6 @@ class DemoAccount:
             raise ValueError("Insufficient free demo margin.")
         qty = margin * self.leverage / entry
         risk = abs(entry - stop)
-        if risk_reward < 2.0:
-            raise ValueError("Three-target demo mode requires a final RR of at least 2.0.")
         direction = 1.0 if side is Side.LONG else -1.0
         targets = (
             entry + direction * risk,
