@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import replace
 
 from telegram import ReplyKeyboardMarkup, Update
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 from app.runtime import runtime
+from app.strategy import StrategyConfig
 
 logger = logging.getLogger(__name__)
 TEMP_MESSAGE_TTL_SECONDS = 120
@@ -18,6 +20,7 @@ MAIN_MENU = ReplyKeyboardMarkup(
         ["/open", "/stats"],
         ["/history", "/panel"],
         ["/symbols", "/add", "/remove"],
+        ["⚙️ تنظیمات کلی استراتژی"],
         ["🥇 همه اطلاعات طلا"],
         ["/help", "/menu"],
     ],
@@ -78,6 +81,8 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     text = (update.effective_message.text or "").strip()
     if text == "🥇 همه اطلاعات طلا":
         await gold_status(update, context)
+    elif text == "⚙️ تنظیمات کلی استراتژی":
+        await strategy_settings(update, context)
     elif text:
         # Legacy-friendly flow: sending a coin name as plain text adds it.
         await _add_symbol_requested(update, context, text)
@@ -229,6 +234,103 @@ async def remove_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     else:
         await _reply_temporary(update, context, "نماد از فهرست اسکن حذف شد. سابقه و معاملات دمو پاک نشدند.")
 
+
+STRATEGY_BOOL_SETTINGS = {
+    "use_trend_filter": "فیلتر روند",
+    "require_ob_touch": "الزام لمس اردربلاک",
+    "use_touch_freshness": "تازگی لمس اردربلاک",
+    "use_choch_filter": "فیلتر CHoCH",
+    "use_choch_strength": "قدرت کندل CHoCH",
+    "use_retest_filter": "فیلتر پولبک",
+    "use_confirm_candle": "کندل تأیید",
+    "use_confirm_strength": "قدرت کندل تأیید",
+    "enable_trendline_signals": "سیگنال شکست خط روند",
+    "use_sma200_trendline_filter": "فیلتر SMA200 خط روند",
+    "use_sma200_filter": "فیلتر SMA200 اردربلاک",
+    "enable_rsi_divergence": "واگرایی RSI",
+    "use_ob_boundary_sl": "حدضرر مرز اردربلاک",
+}
+STRATEGY_NUMBER_SETTINGS = {
+    "risk_percent": ("ریسک هر معامله درصد", 0.1, 5.0),
+    "risk_reward": ("ضریب هدف نهایی R", 1.0, 5.0),
+    "sl_buffer_atr": ("ضریب فاصله حدضرر ATR", 0.1, 3.0),
+    "max_bars_since_touch": ("حداکثر کندل از لمس OB", 1, 100),
+    "trendline_pullback_max_wait": ("مهلت پولبک خط روند", 1, 48),
+    "min_choch_body_atr": ("حداقل قدرت CHoCH برحسب ATR", 0.1, 3.0),
+    "min_confirm_body_atr": ("حداقل قدرت کندل تأیید برحسب ATR", 0.05, 2.0),
+}
+
+def _strategy_settings_text() -> str:
+    cfg = runtime.strategy_config
+    lines = ["⚙️ تنظیمات کلی استراتژی", "وضعیت فعلی:"]
+    for key, label in STRATEGY_BOOL_SETTINGS.items():
+        lines.append(f"{label}: {'روشن' if getattr(cfg, key) else 'خاموش'}")
+    lines += [
+        f"ریسک هر معامله: {cfg.risk_percent:g}٪",
+        f"هدف نهایی: {cfg.risk_reward:g}R (TP1=1R و TP2=2R ثابت)",
+        f"فاصله حدضرر ATR: {cfg.sl_buffer_atr:g}",
+        f"حداکثر کندل از لمس OB: {cfg.max_bars_since_touch}",
+        f"مهلت پولبک خط روند: {cfg.trendline_pullback_max_wait}",
+        f"قدرت CHoCH: {cfg.min_choch_body_atr:g} ATR",
+        f"قدرت کندل تأیید: {cfg.min_confirm_body_atr:g} ATR",
+        "",
+        "تغییر روشن/خاموش:",
+        "/strategy use_choch_filter on یا off",
+        "تغییر عددی:",
+        "/strategy risk_percent 1.0",
+        "نام گزینه‌ها را دقیقاً مانند نمونه وارد کن.",
+        "تنظیمات در SQLite ذخیره می‌شوند و بعد از راه‌اندازی مجدد باقی می‌مانند.",
+        "دو لیمیت، ساختار سه هدف و حساب دمو تغییر نمی‌کنند؛ معاملات واقعی خاموش است.",
+    ]
+    return "\n".join(lines)
+
+async def strategy_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    if not context.args:
+        await _reply_temporary(update, context, _strategy_settings_text())
+        return
+    if len(context.args) != 2:
+        await _reply_temporary(update, context, "نمونه: /strategy use_choch_filter off یا /strategy risk_percent 1.0")
+        return
+    key, raw_value = context.args[0].strip(), context.args[1].strip().lower()
+    cfg = runtime.strategy_config or StrategyConfig()
+    try:
+        if key in STRATEGY_BOOL_SETTINGS:
+            if raw_value in {"on", "true", "1", "روشن"}:
+                value = True
+            elif raw_value in {"off", "false", "0", "خاموش"}:
+                value = False
+            else:
+                raise ValueError("مقدار باید on یا off باشد.")
+        elif key in STRATEGY_NUMBER_SETTINGS:
+            label, minimum, maximum = STRATEGY_NUMBER_SETTINGS[key]
+            value = float(raw_value)
+            if not minimum <= value <= maximum:
+                raise ValueError(f"مقدار {key} باید بین {minimum} و {maximum} باشد.")
+            if key in {"max_bars_since_touch", "trendline_pullback_max_wait"}:
+                if not value.is_integer():
+                    raise ValueError(f"{key} باید عدد صحیح باشد.")
+                value = int(value)
+        else:
+            raise ValueError("این گزینه قابل تغییر نیست یا شناخته نشد.")
+        updated = replace(cfg, **{key: value})
+        # These two execution constraints are intentionally immutable.
+        updated.require_trendline_pullback = True
+        updated.use_trailing_stop = False
+        runtime.strategy_config = updated
+        if runtime.storage is not None:
+            runtime.storage.save_strategy_config(updated)
+        await _reply_temporary(
+            update, context,
+            f"✅ تنظیم شد: {STRATEGY_BOOL_SETTINGS.get(key, STRATEGY_NUMBER_SETTINGS.get(key, (key,))[0])} = "
+            f"{'روشن' if value else 'خاموش' if isinstance(value, bool) else value}\\n"
+            "از چرخه اسکن بعدی اعمال می‌شود.\\n\\n" + _strategy_settings_text(),
+        )
+    except (TypeError, ValueError) as exc:
+        await _reply_temporary(update, context, f"تنظیم انجام نشد: {exc}")
+
+
 async def gold_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized(update, context):
         return
@@ -267,6 +369,7 @@ def build_telegram_application(token: str, allowed_chat_id: str) -> Application:
         ("demo", demo), ("open", open_positions), ("panel", demo_panel),
         ("history", trade_history), ("stats", stats), ("help", help_command),
         ("add", add_symbol), ("remove", remove_symbol), ("symbols", list_symbols),
+        ("strategy", strategy_settings),
     ):
         application.add_handler(CommandHandler(command, callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_router))
