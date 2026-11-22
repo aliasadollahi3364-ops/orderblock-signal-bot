@@ -176,12 +176,13 @@ async def run_crypto_scanner(settings: Settings) -> None:
             return
         target = position.tp1
         notify(
-            f"📣 سیگنال دمو {signal.side} | {signal.symbol}\\n"
-            f"روش: {signal.method}\\n"
-            f"ورود: {position.entry:.8g}\\n"
-            f"حد ضرر: {position.stop:.8g}\\n"
-            f"هدف نهایی: {target:.8g} (RR {signal.risk_reward:g})\\n"
-            f"زمان: {position.opened_at}\\n"
+            f"📣 سیگنال دمو {signal.side} | {signal.symbol}\n"
+            f"روش: {signal.method}\n"
+            f"ورود: {position.entry:.8g}\n"
+            f"حد ضرر: {position.stop:.8g}\n"
+            f"هدف نهایی: {target:.8g} (RR {signal.risk_reward:g})\n"
+            f"زمان: {position.opened_at}\n"
+            f"واگرایی RSI: {signal.rsi_divergence} | RSI: {signal.rsi_value}\n"
             "اجرای مستقیم طبق کد Pine؛ فقط حساب دمو، بدون سفارش واقعی."
         )
 
@@ -189,8 +190,8 @@ async def run_crypto_scanner(settings: Settings) -> None:
         kind = event.get("type", "UPDATE")
         price = event.get("price", "")
         notify(
-            f"📊 نتیجه معامله دمو {event.get('symbol', '')}\\n"
-            f"وضعیت: {kind}\\nقیمت خروج: {price}\\n"
+            f"📊 نتیجه معامله دمو {event.get('symbol', '')}\n"
+            f"وضعیت: {kind}\nقیمت خروج: {price}\n"
             f"سود/زیان: {event.get('realized_pnl', 0):+.4f} USDT"
         )
 
