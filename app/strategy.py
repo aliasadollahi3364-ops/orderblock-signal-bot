@@ -432,7 +432,7 @@ class OrderBlockStrategy:
                 base = min(self.last_pl15, bottom) if cfg.use_ob_boundary_sl else self.last_pl15
                 stop = base-atr*cfg.sl_buffer_atr
                 if candle.close-stop >= cfg.min_tick:
-                    if cfg.use_sma200_filter and (sma is None or candle.close <= sma): continue
+                    if cfg.use_sma200_filter and (sma is None or candle.close <= sma): return None
                     ob.used = True
                     rsi_state, rsi_value = self._signal_rsi_context("BUY", idx)
                 return Signal(self.symbol, "BUY", candle.timestamp, candle.close, stop, atr,
@@ -442,7 +442,7 @@ class OrderBlockStrategy:
                 base = max(self.last_ph15, top) if cfg.use_ob_boundary_sl else self.last_ph15
                 stop = base+atr*cfg.sl_buffer_atr
                 if stop-candle.close >= cfg.min_tick:
-                    if cfg.use_sma200_filter and (sma is None or candle.close >= sma): continue
+                    if cfg.use_sma200_filter and (sma is None or candle.close >= sma): return None
                     ob.used = True
                     rsi_state, rsi_value = self._signal_rsi_context("SELL", idx)
                 return Signal(self.symbol, "SELL", candle.timestamp, candle.close, stop, atr,
