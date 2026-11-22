@@ -336,15 +336,15 @@ class OrderBlockStrategy:
             if self.cfg.enable_rsi_divergence and div_candidate >= 0:
                 candidate_rsi = self._rsi_values[div_candidate] if div_candidate < len(self._rsi_values) else None
                 if candidate_rsi is not None and self._pivot_low(bars, div_candidate, self.cfg.rsi_divergence_pivot_length, self.cfg.rsi_divergence_pivot_length):
-                    if (self._previous_divergence_price_low is not None and self._previous_rsi_pivot_low is not None
-                            and bars[div_candidate].low < self._previous_divergence_price_low
+                    if ((self._previous_divergence_price_low is not None or self.last_pl15 is not None) and self._previous_rsi_pivot_low is not None
+                            and bars[div_candidate].low < (self._previous_divergence_price_low if self._previous_divergence_price_low is not None else self.last_pl15)
                             and candidate_rsi > self._previous_rsi_pivot_low):
                         self._bullish_divergence_bar = div_candidate
                     self._previous_rsi_pivot_low = candidate_rsi
                     self._previous_divergence_price_low = bars[div_candidate].low
                 if candidate_rsi is not None and self._pivot_high(bars, div_candidate, self.cfg.rsi_divergence_pivot_length, self.cfg.rsi_divergence_pivot_length):
-                    if (self._previous_divergence_price_high is not None and self._previous_rsi_pivot_high is not None
-                            and bars[div_candidate].high > self._previous_divergence_price_high
+                    if ((self._previous_divergence_price_high is not None or self.last_ph15 is not None) and self._previous_rsi_pivot_high is not None
+                            and bars[div_candidate].high > (self._previous_divergence_price_high if self._previous_divergence_price_high is not None else self.last_ph15)
                             and candidate_rsi < self._previous_rsi_pivot_high):
                         self._bearish_divergence_bar = div_candidate
                     self._previous_rsi_pivot_high = candidate_rsi
