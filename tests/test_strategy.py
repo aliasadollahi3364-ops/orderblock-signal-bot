@@ -292,6 +292,53 @@ def test_rsi_divergence_can_be_disabled_without_changing_entry_logic():
     assert value is None
 
 
+
+
+def test_bullish_order_block_with_invalid_stop_is_skipped():
+    from app.strategy import OrderBlock
+
+    cfg = StrategyConfig(
+        pivot15=1, atr_len=1, require_ob_touch=True,
+        use_touch_freshness=False, use_choch_filter=False,
+        use_retest_filter=False, use_confirm_candle=True,
+        use_confirm_strength=False, use_ob_boundary_sl=False,
+        use_trend_filter=False, use_sma200_filter=False,
+        sl_buffer_atr=0.1, min_tick=0.001,
+    )
+    engine = OrderBlockStrategy("BTC/USDT", cfg)
+    engine.last_pl15 = 105.0  # would put the long stop above the 101 entry
+    ob = OrderBlock(direction=1, top=102.0, bottom=100.0, origin_time=1)
+    engine.order_blocks.append(ob)
+
+    signal = engine.on_15m_close(bar(1000, 99.5, 101.5, 99.0, 101.0))
+
+    assert signal is None
+    assert not ob.used
+    assert engine.last_early_warning is None
+
+
+def test_bearish_order_block_with_invalid_stop_is_skipped():
+    from app.strategy import OrderBlock
+
+    cfg = StrategyConfig(
+        pivot15=1, atr_len=1, require_ob_touch=True,
+        use_touch_freshness=False, use_choch_filter=False,
+        use_retest_filter=False, use_confirm_candle=True,
+        use_confirm_strength=False, use_ob_boundary_sl=False,
+        use_trend_filter=False, use_sma200_filter=False,
+        sl_buffer_atr=0.1, min_tick=0.001,
+    )
+    engine = OrderBlockStrategy("BTC/USDT", cfg)
+    engine.last_ph15 = 95.0  # would put the short stop below the 99 entry
+    ob = OrderBlock(direction=-1, top=100.0, bottom=98.0, origin_time=1)
+    engine.order_blocks.append(ob)
+
+    signal = engine.on_15m_close(bar(1000, 100.5, 101.0, 98.5, 99.0))
+
+    assert signal is None
+    assert not ob.used
+    assert engine.last_early_warning is None
+
 def test_order_block_warning_waits_for_choch_and_confirmation_candle():
     from app.strategy import OrderBlock
 
