@@ -13,6 +13,8 @@ from app.api import app
 from app.config import Settings
 from app.demo import DemoAccount
 from app.gold_market import GoldMarketService, format_gold_signal
+from app.market_data import WeexMarketData
+from app.scanner import AutomaticScanner, open_demo_from_signal
 from app.runtime import runtime
 from app.storage import SQLiteStore
 from app.strategy import StrategyConfig
@@ -142,6 +144,73 @@ async def run_gold_scanner(settings: Settings) -> None:
             await bot.shutdown()
 
 
+async def run_crypto_scanner(settings: Settings) -> None:
+    """Run the supplied Pine strategy on manually selected WEEX symbols, demo-only."""
+    market_data = WeexMarketData(settings.exchange_id, settings.quote_currency)
+    runtime.market_symbol_resolver = market_data
+    loop = asyncio.get_running_loop()
+    bot = Bot(token=settings.telegram_bot_token) if settings.telegram_bot_token and settings.telegram_chat_id else None
+    if bot is not None:
+        try:
+            await bot.initialize()
+        except Exception:
+            logger.exception("Crypto Telegram notifications unavailable; demo scanning continues.")
+            bot = None
+
+    def notify(message: str) -> None:
+        if bot is None:
+            return
+        future = asyncio.run_coroutine_threadsafe(
+            bot.send_message(chat_id=settings.telegram_chat_id, text=message), loop
+        )
+        def report_error(done):
+            try:
+                done.result()
+            except Exception:
+                logger.exception("Crypto Telegram notification failed.")
+        future.add_done_callback(report_error)
+
+    def on_signal(signal) -> None:
+        position = open_demo_from_signal(signal)
+        if position is None:
+            return
+        target = position.tp1
+        notify(
+            f"📣 سیگنال دمو {signal.side} | {signal.symbol}\\n"
+            f"روش: {signal.method}\\n"
+            f"ورود: {position.entry:.8g}\\n"
+            f"حد ضرر: {position.stop:.8g}\\n"
+            f"هدف نهایی: {target:.8g} (RR {signal.risk_reward:g})\\n"
+            f"زمان: {position.opened_at}\\n"
+            "اجرای مستقیم طبق کد Pine؛ فقط حساب دمو، بدون سفارش واقعی."
+        )
+
+    def on_trade_event(event: dict) -> None:
+        kind = event.get("type", "UPDATE")
+        price = event.get("price", "")
+        notify(
+            f"📊 نتیجه معامله دمو {event.get('symbol', '')}\\n"
+            f"وضعیت: {kind}\\nقیمت خروج: {price}\\n"
+            f"سود/زیان: {event.get('realized_pnl', 0):+.4f} USDT"
+        )
+
+    scanner = AutomaticScanner(
+        market_data=market_data,
+        strategy_config=runtime.strategy_config,
+        universe_limit=settings.scanner_universe_limit,
+        candidate_limit=settings.scanner_candidate_limit,
+        on_signal=on_signal,
+        on_trade_event=on_trade_event,
+    )
+    logger.info("Pine strategy scanner started; manual symbols only; demo-only.")
+    try:
+        await asyncio.to_thread(scanner.run_forever, settings.scan_interval_seconds)
+    finally:
+        market_data.close()
+        if bot is not None:
+            await bot.shutdown()
+
+
 async def main() -> None:
     settings = Settings()
     settings.assert_demo_only()
@@ -152,14 +221,13 @@ async def main() -> None:
         leverage=settings.demo_leverage,
     ))
     runtime.storage = store
-    # Crypto scanning and pending crypto limit setups are intentionally disabled.
-    # Saving the demo snapshot also clears any obsolete pending-limit records.
-    runtime.pending_limits.setups.clear()
-    # Preserve the user's manually selected crypto symbols for the next strategy.
+    # Keep the user's manually selected symbols and the existing demo ledger.
+    runtime.manual_symbols = store.load_manual_symbols()
     runtime.selected_symbols = []
     runtime.signal_count = 0
-    runtime.scanner_state = "DISABLED_BY_RESET"
-    runtime.strategy_config = store.load_strategy_config() or StrategyConfig()
+    runtime.scanner_state = "WAITING_FOR_MANUAL_SYMBOLS"
+    # Start from the exact defaults in the supplied Pine v6 strategy.
+    runtime.strategy_config = StrategyConfig()
     runtime.persist_demo_state()
 
     server = uvicorn.Server(uvicorn.Config(app, host=settings.host, port=settings.port, log_level="info"))
@@ -167,6 +235,7 @@ async def main() -> None:
         server.serve(),
         run_telegram(settings.telegram_bot_token, settings.telegram_chat_id),
         run_gold_scanner(settings),
+        run_crypto_scanner(settings),
     )
 
 
