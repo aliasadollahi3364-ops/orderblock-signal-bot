@@ -78,8 +78,9 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     text = (update.effective_message.text or "").strip()
     if text == "🥇 همه اطلاعات طلا":
         await gold_status(update, context)
-    else:
-        await _reply_temporary(update, context, "برای استفاده از ربات یکی از دکمه‌ها یا دستورهای منو را انتخاب کن.", reply_markup=MAIN_MENU)
+    elif text:
+        # Legacy-friendly flow: sending a coin name as plain text adds it.
+        await _add_symbol_requested(update, context, text)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -87,7 +88,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _reply_temporary(
             update, context,
             "ربات آماده است. بخش‌های فعال: استراتژی اصلی WEEX، حساب دمو و تحلیل طلای ۱۸ عیار.\n"
-            "برای افزودن ارز: /add BTCUSDT | فهرست: /symbols | حذف: /remove BTCUSDT\n"
+            "برای افزودن ارز فقط نام آن را بفرست، مثلاً BTC یا RENDER؛ فهرست: /symbols | حذف: /remove BTCUSDT\n"
             "ورودها مستقیم و فقط در حساب دمو هستند؛ معامله واقعی خاموش است.",
             reply_markup=MAIN_MENU,
         )
@@ -174,29 +175,34 @@ async def list_symbols(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await _reply_temporary(update, context, text)
 
 
-async def add_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _authorized(update, context):
-        return
-    if not context.args:
-        await _reply_temporary(update, context, "نمونه: /add BTCUSDT")
-        return
+async def _add_symbol_requested(update: Update, context: ContextTypes.DEFAULT_TYPE, requested: str) -> None:
     resolver = runtime.market_symbol_resolver
     if resolver is None:
         await _reply_temporary(update, context, "اتصال داده بازار هنوز آماده نیست؛ کمی بعد دوباره تلاش کن.")
         return
-    requested = context.args[0]
     try:
         market = await asyncio.to_thread(resolver.resolve_manual_symbol, requested)
     except Exception as exc:
         await _reply_temporary(update, context, f"نماد معتبر یا فعال در WEEX پیدا نشد: {exc}")
         return
     canonical = market.symbol
-    if canonical not in runtime.manual_symbols:
-        runtime.manual_symbols.append(canonical)
-        runtime.manual_symbols.sort()
-        if runtime.storage is not None:
-            runtime.storage.save_manual_symbols(runtime.manual_symbols)
-    await _reply_temporary(update, context, f"✅ {canonical} به فهرست دستی اضافه شد. اسکن فقط روی نمادهای همین فهرست انجام می‌شود.")
+    if canonical in runtime.manual_symbols:
+        await _reply_temporary(update, context, f"ℹ️ {canonical} از قبل در فهرست نمادهای دستی وجود دارد.")
+        return
+    runtime.manual_symbols.append(canonical)
+    runtime.manual_symbols.sort()
+    if runtime.storage is not None:
+        runtime.storage.save_manual_symbols(runtime.manual_symbols)
+    await _reply_temporary(update, context, f"✅ {canonical} به فهرست دستی اضافه شد. اسکن از این پس روی آن انجام می‌شود.")
+
+
+async def add_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    if not context.args:
+        await _reply_temporary(update, context, "فقط نام ارز را بفرست؛ مثلاً BTC یا RENDER. دستور /add هم همچنان فعال است.")
+        return
+    await _add_symbol_requested(update, context, context.args[0])
 
 
 async def remove_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -245,7 +251,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "/start - شروع\n/status - وضعیت ربات\n/gold - وضعیت تحلیل طلای ۱۸ عیار\n"
             "/demo - موجودی حساب دمو\n/open - معاملات باز دمو\n/stats - آمار دمو\n"
             "/panel - پنل حساب دمو\n/history - تاریخچه دمو\n"
-            "/add نماد - افزودن نماد دستی\n/remove نماد - حذف نماد\n/symbols - فهرست نمادها\n"
+            "فقط نام ارز را بفرست - افزودن نماد دستی (مثلاً BTC یا RENDER)\n/add نماد - افزودن با دستور\n/remove نماد - حذف نماد\n/symbols - فهرست نمادها\n"
             "/menu - منوی اصلی\n/help - راهنما",
             reply_markup=MAIN_MENU,
         )
