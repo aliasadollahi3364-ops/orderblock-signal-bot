@@ -170,7 +170,7 @@ async def list_symbols(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not await _authorized(update, context):
         return
     symbols = runtime.manual_symbols
-    text = "📋 نمادهای دستی برای اسکن:\\n" + ("\\n".join(symbols) if symbols else "هنوز نمادی اضافه نشده است.")
+    text = "📋 نمادهای دستی برای اسکن:\n" + ("\n".join(symbols) if symbols else "هنوز نمادی اضافه نشده است.")
     await _reply_temporary(update, context, text)
 
 
