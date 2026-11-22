@@ -16,7 +16,7 @@ from app.demo import Side
 from app.market_data import MarketCandidate
 from app.pending_limits import PendingStatus
 from app.runtime import runtime
-from app.strategy import Candle, OrderBlockStrategy, Signal, StrategyConfig
+from app.strategy import Candle, EarlyWarning, OrderBlockStrategy, Signal, StrategyConfig
 
 log = logging.getLogger(__name__)
 MS_15M = 15 * 60 * 1000
@@ -62,13 +62,14 @@ def _to_candles(rows: list[list[float]]) -> list[Candle]:
 
 
 def _ordered_feed(engine: OrderBlockStrategy, bars4: list[Candle],
-                  bars15: list[Candle]) -> Signal | None:
+                  bars15: list[Candle]) -> tuple[Signal | None, EarlyWarning | None]:
     """Replay closed candles by close-time; process the final 15m bar before the new 4h close on boundary ties to avoid HTF lookahead."""
     events: list[tuple[int, int, Candle]] = []
     events.extend((bar.timestamp + MS_4H, 1, bar) for bar in bars4)
     events.extend((bar.timestamp + MS_15M, 0, bar) for bar in bars15)
     events.sort(key=lambda event: (event[0], event[1]))
     latest_signal = None
+    latest_warning = None
     now_ms = int(time.time() * 1000)
     for close_time, kind, bar in events:
         if close_time > now_ms:
@@ -79,10 +80,17 @@ def _ordered_feed(engine: OrderBlockStrategy, bars4: list[Candle],
             signal = engine.on_15m_close(bar)
             if signal is not None:
                 latest_signal = signal
+            if engine.last_early_warning is not None:
+                latest_warning = engine.last_early_warning
     completed_15m = [b for b in bars15 if b.timestamp + MS_15M <= now_ms]
-    if not completed_15m or latest_signal is None:
-        return None
-    return latest_signal if latest_signal.timestamp == completed_15m[-1].timestamp else None
+    if not completed_15m:
+        return None, None
+    latest_bar_timestamp = completed_15m[-1].timestamp
+    current_signal = (latest_signal if latest_signal is not None and
+                      latest_signal.timestamp == latest_bar_timestamp else None)
+    current_warning = (latest_warning if latest_warning is not None and
+                       latest_warning.timestamp == latest_bar_timestamp else None)
+    return current_signal, current_warning
 
 
 def _active_ob_distance(engine: OrderBlockStrategy, price: float) -> float | None:
@@ -106,6 +114,7 @@ class AutomaticScanner:
         universe_limit: int = 500,
         candidate_limit: int = 60,
         on_signal: Callable[[Signal], None] | None = None,
+        on_early_warning: Callable[[EarlyWarning], None] | None = None,
         on_trade_event: Callable[[dict], None] | None = None,
         on_pending_event: Callable[[dict], None] | None = None,
     ):
@@ -116,10 +125,12 @@ class AutomaticScanner:
         self.universe_limit = universe_limit
         self.candidate_limit = candidate_limit
         self.on_signal = on_signal
+        self.on_early_warning = on_early_warning
         self.on_trade_event = on_trade_event
         self.on_pending_event = on_pending_event
         self._last_demo_bar: dict[str, int] = {}
         self._last_signal_bar: dict[str, int] = {}
+        self._last_early_warning_bar: dict[str, int] = {}
         self._selected: list[str] = []
 
     def _cancel_remaining_pending(self, symbol: str, timestamp: int, reason: str,
@@ -331,7 +342,12 @@ class AutomaticScanner:
                 bars4 = market_cache[market.symbol][0]
                 bars15 = _to_candles(self.market_data.fetch_ohlcv(market.symbol, "15m", 3520))
                 engine = OrderBlockStrategy(market.symbol, strategy_config)
-                signal = _ordered_feed(engine, bars4, bars15)
+                signal, early_warning = _ordered_feed(engine, bars4, bars15)
+                if (early_warning is not None and
+                        self._last_early_warning_bar.get(early_warning.symbol) != early_warning.timestamp):
+                    self._last_early_warning_bar[early_warning.symbol] = early_warning.timestamp
+                    if self.on_early_warning:
+                        self.on_early_warning(early_warning)
                 if signal is not None and self._last_signal_bar.get(signal.symbol) != signal.timestamp:
                     self._last_signal_bar[signal.symbol] = signal.timestamp
                     self._last_demo_bar[signal.symbol] = signal.timestamp

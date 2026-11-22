@@ -19,7 +19,7 @@ from app.pending_limits import PendingLimit, PendingSetup, make_two_limit_prices
 from app.scanner import AutomaticScanner, open_demo_from_signal
 from app.runtime import runtime
 from app.storage import SQLiteStore
-from app.strategy import StrategyConfig
+from app.strategy import EarlyWarning, StrategyConfig
 from app.telegram_bot import build_telegram_application
 
 logging.basicConfig(level=logging.INFO)
@@ -230,6 +230,36 @@ async def run_crypto_scanner(settings: Settings) -> None:
         except Exception:
             logger.exception("Could not create/send signal chart for %s", signal.symbol)
 
+    def on_early_warning(warning: EarlyWarning) -> None:
+        side_label = "BUY" if warning.side == "BUY" else "SELL"
+        warning_close = datetime.fromtimestamp(
+            (warning.timestamp + 15 * 60 * 1000) / 1000, timezone.utc
+        ).strftime("%Y-%m-%d %H:%M:%S UTC")
+        if warning.kind == "ORDER_BLOCK_CONFIRMATION":
+            notify(
+                f"✅ هشدار تأیید اردربلاک | {warning.symbol}\n"
+                f"جهت: {side_label} | تایم‌فریم: ۱۵ دقیقه\n"
+                f"قیمت تأیید: {warning.break_price:.8g}\n"
+                f"محدوده اردربلاک معتبر: {warning.ob_bottom:.8g} تا {warning.ob_top:.8g}\n"
+                f"حد ضرر ساختاری: {warning.stop:.8g}\n"
+                f"زمان تأیید: {warning_close}\n"
+                "شرط CHoCH و کندل تأیید تکمیل شده است؛ سیگنال اصلی نیز در همین مرحله بررسی می‌شود.\n"
+                "این هشدار به‌تنهایی سفارش یا پوزیشن جداگانه‌ای ایجاد نمی‌کند. فقط حساب دمو؛ معاملات واقعی خاموش."
+            )
+            return
+        notify(
+            f"⚠️ هشدار اولیه شکست خط روند | {warning.symbol}\n"
+            f"جهت احتمالی: {side_label} | تایم‌فریم: ۱۵ دقیقه\n"
+            f"قیمت بسته‌شدن کندل شکست: {warning.break_price:.8g}\n"
+            f"سطح خط روند شکسته‌شده: {warning.trendline_level:.8g}\n"
+            f"محدوده اردربلاک هم‌جهت: {warning.ob_bottom:.8g} تا {warning.ob_top:.8g}\n"
+            f"حد ضرر ساختاریِ فعلی: {warning.stop:.8g}\n"
+            f"زمان هشدار: {warning_close}\n"
+            "این فقط هشدار اولیه است؛ هنوز سیگنال ورود یا سفارش لیمیت صادر نشده. "
+            "منتظر پولبک، لمس اردربلاک و تأیید نهایی بمان.\n"
+            "فقط حساب دمو؛ معاملات واقعی خاموش."
+        )
+
     def on_signal(signal) -> None:
         # Two staged limits are used only for the trendline pullback path.
         # Order-block entries remain direct Pine-strategy demo entries.
@@ -342,6 +372,7 @@ async def run_crypto_scanner(settings: Settings) -> None:
         universe_limit=settings.scanner_universe_limit,
         candidate_limit=settings.scanner_candidate_limit,
         on_signal=on_signal,
+        on_early_warning=on_early_warning,
         on_trade_event=on_trade_event,
         on_pending_event=on_pending_event,
     )

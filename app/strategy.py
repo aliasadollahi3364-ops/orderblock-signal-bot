@@ -94,6 +94,20 @@ class OrderBlock:
 
 
 @dataclass(frozen=True)
+class EarlyWarning:
+    """A confirmed trendline-break heads-up; it is not an entry or pending order."""
+    symbol: str
+    side: str
+    timestamp: int
+    break_price: float
+    trendline_level: Optional[float]
+    stop: float
+    ob_top: float
+    ob_bottom: float
+    kind: str = "TRENDLINE_BREAK"
+
+
+@dataclass(frozen=True)
 class Signal:
     symbol: str
     side: str
@@ -171,6 +185,7 @@ class OrderBlockStrategy:
         self._short_break_bar: Optional[int] = None
         self._long_sl: Optional[float] = None
         self._short_sl: Optional[float] = None
+        self.last_early_warning: Optional[EarlyWarning] = None
         self._previous_rsi_pivot_low: Optional[float] = None
         self._previous_rsi_pivot_high: Optional[float] = None
         self._bullish_divergence_bar: Optional[int] = None
@@ -319,6 +334,7 @@ class OrderBlockStrategy:
     def on_15m_close(self, candle: Candle) -> Optional[Signal]:
         if self._last_15m_timestamp is not None and candle.timestamp <= self._last_15m_timestamp:
             raise ValueError("15m candles must be strictly chronological.")
+        self.last_early_warning = None
         bars = self.candles15
         previous_close = bars[-1].close if bars else None
         bars.append(candle)
@@ -367,10 +383,28 @@ class OrderBlockStrategy:
             self._long_pending, self._long_level, self._long_break_bar = True, resistance_now, idx
             self._long_sl = self.last_pl15-atr*cfg.sl_buffer_atr if self.last_pl15 is not None else None
             self._short_pending, self._short_level, self._short_break_bar, self._short_sl = False, None, None, None
+            early_ob = next((ob for ob in reversed(self.order_blocks)
+                             if ob.active and not ob.used and ob.direction == 1), None)
+            if (early_ob is not None and self._long_sl is not None and self._long_sl < candle.close
+                    and (not cfg.use_sma200_trendline_filter or
+                         (sma is not None and candle.close > sma))):
+                self.last_early_warning = EarlyWarning(
+                    self.symbol, "BUY", candle.timestamp, candle.close,
+                    resistance_now, self._long_sl, early_ob.top, early_ob.bottom,
+                )
         if break_down:
             self._short_pending, self._short_level, self._short_break_bar = True, support_now, idx
             self._short_sl = self.last_ph15+atr*cfg.sl_buffer_atr if self.last_ph15 is not None else None
             self._long_pending, self._long_level, self._long_break_bar, self._long_sl = False, None, None, None
+            early_ob = next((ob for ob in reversed(self.order_blocks)
+                             if ob.active and not ob.used and ob.direction == -1), None)
+            if (early_ob is not None and self._short_sl is not None and self._short_sl > candle.close
+                    and (not cfg.use_sma200_trendline_filter or
+                         (sma is not None and candle.close < sma))):
+                self.last_early_warning = EarlyWarning(
+                    self.symbol, "SELL", candle.timestamp, candle.close,
+                    support_now, self._short_sl, early_ob.top, early_ob.bottom,
+                )
         tol = atr*cfg.trendline_retest_atr
         if self._long_pending and self._long_break_bar is not None and (idx-self._long_break_bar > cfg.trendline_pullback_max_wait or candle.close < self._long_level-tol):
             self._long_pending, self._long_level, self._long_break_bar, self._long_sl = False, None, None, None
@@ -421,22 +455,42 @@ class OrderBlockStrategy:
             if can_use and retest and direction == 1 and bull_dir and bull_power and self.last_pl15 is not None:
                 base = min(self.last_pl15, bottom) if cfg.use_ob_boundary_sl else self.last_pl15
                 stop = base-atr*cfg.sl_buffer_atr
-                if candle.close-stop >= cfg.min_tick:
-                    if cfg.use_sma200_filter and (sma is None or candle.close <= sma): continue
-                    ob.used = True
-                    rsi_state, rsi_value = self._signal_rsi_context("BUY", idx)
+                # Reject this OB and keep searching if its structural stop is
+                # not below the long entry by at least one minimum tick.
+                if candle.close - stop < cfg.min_tick:
+                    continue
+                if cfg.use_sma200_filter and (sma is None or candle.close <= sma):
+                    continue
+                ob.used = True
+                rsi_state, rsi_value = self._signal_rsi_context("BUY", idx)
+                if (cfg.use_choch_filter and ob.has_choch and
+                        cfg.use_confirm_candle and bull_dir and bull_power):
+                    self.last_early_warning = EarlyWarning(
+                        self.symbol, "BUY", candle.timestamp, candle.close,
+                        None, stop, top, bottom, "ORDER_BLOCK_CONFIRMATION",
+                    )
                 return Signal(self.symbol, "BUY", candle.timestamp, candle.close, stop, atr,
-                              ob.origin_time, top, bottom, self.trend4h, sma, "ORDER_BLOCK",
+                          ob.origin_time, top, bottom, self.trend4h, sma, "ORDER_BLOCK",
                               cfg.risk_reward, None, rsi_state, rsi_value)
             if can_use and retest and direction == -1 and bear_dir and bear_power and self.last_ph15 is not None:
                 base = max(self.last_ph15, top) if cfg.use_ob_boundary_sl else self.last_ph15
                 stop = base+atr*cfg.sl_buffer_atr
-                if stop-candle.close >= cfg.min_tick:
-                    if cfg.use_sma200_filter and (sma is None or candle.close >= sma): continue
-                    ob.used = True
-                    rsi_state, rsi_value = self._signal_rsi_context("SELL", idx)
+                # Reject this OB and keep searching if its structural stop is
+                # not above the short entry by at least one minimum tick.
+                if stop - candle.close < cfg.min_tick:
+                    continue
+                if cfg.use_sma200_filter and (sma is None or candle.close >= sma):
+                    continue
+                ob.used = True
+                rsi_state, rsi_value = self._signal_rsi_context("SELL", idx)
+                if (cfg.use_choch_filter and ob.has_choch and
+                        cfg.use_confirm_candle and bear_dir and bear_power):
+                    self.last_early_warning = EarlyWarning(
+                        self.symbol, "SELL", candle.timestamp, candle.close,
+                        None, stop, top, bottom, "ORDER_BLOCK_CONFIRMATION",
+                    )
                 return Signal(self.symbol, "SELL", candle.timestamp, candle.close, stop, atr,
-                              ob.origin_time, top, bottom, self.trend4h, sma, "ORDER_BLOCK",
+                          ob.origin_time, top, bottom, self.trend4h, sma, "ORDER_BLOCK",
                               cfg.risk_reward, None, rsi_state, rsi_value)
 
         if tl_long:
