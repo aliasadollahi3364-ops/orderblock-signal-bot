@@ -329,7 +329,7 @@ class AutomaticScanner:
         for market in selected_markets:
             try:
                 bars4 = market_cache[market.symbol][0]
-                bars15 = _to_candles(self.market_data.fetch_ohlcv(market.symbol, "15m", 320))
+                bars15 = _to_candles(self.market_data.fetch_ohlcv(market.symbol, "15m", 3520))
                 engine = OrderBlockStrategy(market.symbol, strategy_config)
                 signal = _ordered_feed(engine, bars4, bars15)
                 if signal is not None and self._last_signal_bar.get(signal.symbol) != signal.timestamp:
