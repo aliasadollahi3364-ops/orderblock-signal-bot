@@ -413,7 +413,10 @@ def open_demo_from_signal(signal: Signal):
     side = Side.LONG if signal.side == "BUY" else Side.SHORT
     try:
         entry_time = datetime.fromtimestamp((signal.timestamp + MS_15M) / 1000, timezone.utc).isoformat()
-        position = runtime.account.open_position(signal.symbol, side, signal.entry, signal.stop, opened_at=entry_time)
+        position = runtime.account.open_position(
+            signal.symbol, side, signal.entry, signal.stop, opened_at=entry_time,
+            risk_percent=1.0, risk_reward=signal.risk_reward,
+        )
         runtime.persist_demo_state()
         return position
     except ValueError as exc:
