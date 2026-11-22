@@ -401,8 +401,8 @@ async def main() -> None:
     runtime.selected_symbols = []
     runtime.signal_count = 0
     runtime.scanner_state = "WAITING_FOR_MANUAL_SYMBOLS"
-    # Start from the exact defaults in the supplied Pine v6 strategy.
-    runtime.strategy_config = StrategyConfig()
+    # Restore the user's saved Telegram strategy settings; fall back to Pine defaults only on first setup.
+    runtime.strategy_config = store.load_strategy_config()
     server = uvicorn.Server(uvicorn.Config(app, host=settings.host, port=settings.port, log_level="info"))
     await asyncio.gather(
         server.serve(),
