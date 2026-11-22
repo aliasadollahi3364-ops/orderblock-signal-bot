@@ -354,8 +354,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "/demo - موجودی حساب دمو\n/open - معاملات باز دمو\n/stats - آمار دمو\n"
             "/panel - پنل حساب دمو\n/history - تاریخچه دمو\n"
             "فقط نام ارز را بفرست - افزودن نماد دستی (مثلاً BTC یا RENDER)\n/add نماد - افزودن با دستور\n/remove نماد - حذف نماد\n/symbols - فهرست نمادها\n"
-            "/strategy - تنظیمات کلی استراتژی\\n"
-            "/strategy نام_گزینه on|off|عدد - تغییر تنظیم\\n"
+            "/strategy - تنظیمات کلی استراتژی\n"
+            "/strategy نام_گزینه on|off|عدد - تغییر تنظیم\n"
             "/menu - منوی اصلی\n/help - راهنما",
             reply_markup=MAIN_MENU,
         )
