@@ -10,6 +10,7 @@ import uvicorn
 from telegram import Bot
 
 from app.api import app
+from app.charting import make_signal_chart
 from app.config import Settings
 from app.demo import DemoAccount
 from app.gold_market import GoldMarketService, format_gold_signal
@@ -171,6 +172,64 @@ async def run_crypto_scanner(settings: Settings) -> None:
                 logger.exception("Crypto Telegram notification failed.")
         future.add_done_callback(report_error)
 
+    async def send_pending_signal_photo(signal, near, deep, near_targets, deep_targets) -> None:
+        if bot is None:
+            return
+        try:
+            rows = await asyncio.to_thread(market_data.fetch_ohlcv, signal.symbol, "15m", 80)
+            chart = make_signal_chart(
+                rows, signal.symbol, signal.side, near, signal.stop,
+                near_targets[0], near_targets[1], near_targets[2],
+                entry2=deep, tp1_2=deep_targets[0],
+                tp2_2=deep_targets[1], tp3_2=deep_targets[2],
+            )
+            caption = (
+                f"📊 شکست خط روند + اردربلاک | {signal.symbol}\\n"
+                f"لیمیت ۱: {near:g} | لیمیت ۲: {deep:g}\\n"
+                f"حد ضرر: {signal.stop:g}\\n"
+                "اهداف روی نمودار برای هر ورود تخمینی‌اند؛ پس از پرشدن سفارش‌ها، میانگین ورود و اهداف مشترک پوزیشن به‌روز می‌شوند.\\n"
+                "مارجین هر لیمیت: ۵ دلار | حداکثر مارجین کل: ۱۰ دلار. فقط حساب دمو."
+            )
+            await bot.send_photo(chat_id=settings.telegram_chat_id, photo=chart, caption=caption)
+        except Exception:
+            logger.exception("Could not create/send two-limit chart for %s", signal.symbol)
+
+    async def send_signal_photo(signal, position) -> None:
+        if bot is None:
+            return
+        try:
+            rows = await asyncio.to_thread(market_data.fetch_ohlcv, signal.symbol, "15m", 80)
+            chart = make_signal_chart(
+                rows, signal.symbol, signal.side, signal.entry, signal.stop,
+                position.tp1, position.tp2, position.tp3,
+            )
+            entry_time = datetime.fromtimestamp(
+                (signal.timestamp + 15 * 60 * 1000) / 1000, timezone.utc
+            ).strftime("%Y-%m-%d %H:%M:%S UTC")
+            rsi_label = {
+                "BULLISH": "واگرایی صعودی هم‌جهت؛ تأیید اضافی",
+                "BEARISH": "واگرایی نزولی هم‌جهت؛ تأیید اضافی",
+                "OPPOSING_BEARISH": "واگرایی نزولی خلاف جهت؛ احتیاط",
+                "OPPOSING_BULLISH": "واگرایی صعودی خلاف جهت؛ احتیاط",
+                "NONE": "بدون واگرایی؛ سیگنال طبق شروط اصلی معتبر می‌ماند",
+                "DISABLED": "بررسی واگرایی خاموش",
+            }.get(signal.rsi_divergence, "نامشخص")
+            caption = (
+                f"📣 سیگنال جدید دمو | {signal.symbol}\\n"
+                f"جهت: {signal.side} | روش: {signal.method}\\n"
+                f"واگرایی RSI: {rsi_label}"
+                + (f" | RSI: {signal.rsi_value:.1f}" if signal.rsi_value is not None else "")
+                + "\\n"
+                f"ورود: {signal.entry:g}\\nحد ضرر: {signal.stop:g}\\n"
+                f"TP1: {position.tp1:g} | TP2: {position.tp2:g} | TP3: {position.tp3:g}\\n"
+                f"زمان ورود: {entry_time}\\n"
+                "زمان خروج: پس از برخورد به حد ضرر یا اهداف، در پیام رویداد ثبت می‌شود.\\n"
+                "فقط حساب دمو؛ معاملات واقعی خاموش."
+            )
+            await bot.send_photo(chat_id=settings.telegram_chat_id, photo=chart, caption=caption)
+        except Exception:
+            logger.exception("Could not create/send signal chart for %s", signal.symbol)
+
     def on_signal(signal) -> None:
         # Two staged limits are used only for the trendline pullback path.
         # Order-block entries remain direct Pine-strategy demo entries.
@@ -223,6 +282,11 @@ async def run_crypto_scanner(settings: Settings) -> None:
                     f"واگرایی RSI: {signal.rsi_divergence} | RSI: {signal.rsi_value}\n"
                     "فقط حساب دمو؛ معاملات واقعی خاموش."
                 )
+                if bot is not None:
+                    asyncio.run_coroutine_threadsafe(
+                        send_pending_signal_photo(signal, near, deep, (n1, n2, n3), (d1, d2, d3)),
+                        loop,
+                    )
             except Exception as exc:
                 logger.warning("Two-limit setup rejected for %s: %s", signal.symbol, exc)
             return
@@ -242,6 +306,8 @@ async def run_crypto_scanner(settings: Settings) -> None:
             f"واگرایی RSI: {signal.rsi_divergence} | RSI: {signal.rsi_value}\n"
             "پس از TP1 حد ضرر به ورود و پس از TP2 به TP1 منتقل می‌شود. فقط حساب دمو؛ بدون سفارش واقعی."
         )
+        if bot is not None:
+            asyncio.run_coroutine_threadsafe(send_signal_photo(signal, position), loop)
 
     def on_pending_event(event: dict) -> None:
         event_type = event.get("type", "LIMIT_UPDATE")
