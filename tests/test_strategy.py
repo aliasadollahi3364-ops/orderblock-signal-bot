@@ -177,7 +177,7 @@ def test_trendline_break_waits_for_a_later_pullback_and_confirmation():
     assert warning is not None
     assert warning.side == "BUY"
     assert warning.timestamp == 2
-    assert warning.trendline_level == 105.0
+    assert warning.trendline_level == 100.0  # line extrapolated to the breakout candle
     assert warning.ob_top == 108.0
     assert warning.ob_bottom == 100.0
 
