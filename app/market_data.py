@@ -130,7 +130,30 @@ class WeexMarketData:
         cached = self._ohlcv_cache.get(key)
         if cached and now < cached[0]:
             return [row[:] for row in cached[1]]
-        rows = self.exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+        if limit <= 1000:
+            rows = self.exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+        else:
+            # Reconstruct enough 15m history to replay the Pine pivots and OB
+            # touch state over the same 4h structural window (220 * 16 bars).
+            timeframe_ms = {"1m": 60_000, "5m": 300_000, "15m": 900_000,
+                            "30m": 1_800_000, "1h": 3_600_000, "4h": 14_400_000}.get(timeframe)
+            if timeframe_ms is None:
+                raise ValueError(f"Unsupported paginated timeframe: {timeframe}")
+            cursor = int(time.time() * 1000) - limit * timeframe_ms
+            rows = []
+            while len(rows) < limit:
+                batch = self.exchange.fetch_ohlcv(
+                    symbol, timeframe=timeframe, since=cursor,
+                    limit=min(1000, limit - len(rows)),
+                )
+                if not batch:
+                    break
+                rows.extend(batch)
+                next_cursor = int(batch[-1][0]) + timeframe_ms
+                if next_cursor <= cursor or len(batch) < 2:
+                    break
+                cursor = next_cursor
+            rows = sorted({int(row[0]): row for row in rows}.values(), key=lambda row: int(row[0]))[-limit:]
         # 4h structure changes only at a 4h close; 15m entry data is refreshed
         # once per minute. CCXT also enforces the exchange's configured rate limit.
         ttl = 900.0 if timeframe == "4h" else 60.0 if timeframe == "15m" else 15.0
