@@ -324,7 +324,7 @@ async def strategy_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await _reply_temporary(
             update, context,
             f"✅ تنظیم شد: {STRATEGY_BOOL_SETTINGS.get(key, STRATEGY_NUMBER_SETTINGS.get(key, (key,))[0])} = "
-            f"{'روشن' if value else 'خاموش' if isinstance(value, bool) else value}\\n"
+            f"{('روشن' if value else 'خاموش') if isinstance(value, bool) else value}\\n"
             "از چرخه اسکن بعدی اعمال می‌شود.\\n\\n" + _strategy_settings_text(),
         )
     except (TypeError, ValueError) as exc:
