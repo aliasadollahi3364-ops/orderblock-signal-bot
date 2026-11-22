@@ -14,6 +14,7 @@ from app.config import Settings
 from app.demo import DemoAccount
 from app.gold_market import GoldMarketService, format_gold_signal
 from app.market_data import WeexMarketData
+from app.pending_limits import PendingLimit, PendingSetup, make_two_limit_prices
 from app.scanner import AutomaticScanner, open_demo_from_signal
 from app.runtime import runtime
 from app.storage import SQLiteStore
@@ -171,6 +172,61 @@ async def run_crypto_scanner(settings: Settings) -> None:
         future.add_done_callback(report_error)
 
     def on_signal(signal) -> None:
+        # Two staged limits are used only for the trendline pullback path.
+        # Order-block entries remain direct Pine-strategy demo entries.
+        if signal.method == "TRENDLINE":
+            try:
+                if signal.ob_top <= signal.ob_bottom or signal.volume_weighted_price is None:
+                    raise ValueError("محدوده اردربلاک یا قیمت وزنی حجم برای سفارش لیمیت معتبر نیست.")
+                near, deep = make_two_limit_prices(
+                    signal.side, signal.ob_top, signal.ob_bottom,
+                    signal.volume_weighted_price, reference_price=signal.entry,
+                )
+                created_at = signal.timestamp + 15 * 60 * 1000
+                current_position = runtime.account.positions.get(signal.symbol)
+                position_open = current_position is not None and not current_position.closed
+                if not runtime.pending_limits.can_start_setup(
+                    signal.symbol, position_open=position_open, created_at=created_at
+                ):
+                    logger.info("Two-limit setup suppressed for %s: position/setup already active.", signal.symbol)
+                    return
+                setup = PendingSetup(
+                    symbol=signal.symbol,
+                    side=signal.side,
+                    created_at=created_at,
+                    expires_after_bars=runtime.strategy_config.trendline_pullback_max_wait,
+                    invalidation=signal.stop,
+                    stop=signal.stop,
+                    ob_top=signal.ob_top,
+                    ob_bottom=signal.ob_bottom,
+                    limits=[PendingLimit(1, near), PendingLimit(2, deep)],
+                )
+                runtime.pending_limits.add(setup)
+                runtime.persist_pending_limits()
+
+                def targets(entry: float) -> tuple[float, float, float]:
+                    risk = abs(entry - signal.stop)
+                    direction = 1.0 if signal.side == "BUY" else -1.0
+                    return (entry + direction * risk, entry + direction * 2 * risk,
+                            entry + direction * 3 * risk)
+
+                n1, n2, n3 = targets(near)
+                d1, d2, d3 = targets(deep)
+                notify(
+                    f"🚨 هشدار زودهنگام شکست خط روند + تأیید اردربلاک | {signal.symbol}\n"
+                    f"جهت: {signal.side} | تایم‌فریم: ۱۵ دقیقه\n"
+                    f"لیمیت ۱ (نزدیک‌تر): {near:.8g} | TP1: {n1:.8g} | TP2: {n2:.8g} | TP3: {n3:.8g}\n"
+                    f"لیمیت ۲ (عمیق‌تر): {deep:.8g} | TP1: {d1:.8g} | TP2: {d2:.8g} | TP3: {d3:.8g}\n"
+                    f"حد ضرر: {signal.stop:.8g}\n"
+                    "مارجین هر لیمیت: ۵ دلار | مارجین کل در صورت پرشدن هر دو: ۱۰ دلار\n"
+                    "وضعیت: منتظر پولبک و لمس قیمت‌ها؛ تا قبل از پرشدن، پوزیشن دمو باز نمی‌شود.\n"
+                    f"واگرایی RSI: {signal.rsi_divergence} | RSI: {signal.rsi_value}\n"
+                    "فقط حساب دمو؛ معاملات واقعی خاموش."
+                )
+            except Exception as exc:
+                logger.warning("Two-limit setup rejected for %s: %s", signal.symbol, exc)
+            return
+
         position = open_demo_from_signal(signal)
         if position is None:
             return
@@ -186,6 +242,24 @@ async def run_crypto_scanner(settings: Settings) -> None:
             f"واگرایی RSI: {signal.rsi_divergence} | RSI: {signal.rsi_value}\n"
             "پس از TP1 حد ضرر به ورود و پس از TP2 به TP1 منتقل می‌شود. فقط حساب دمو؛ بدون سفارش واقعی."
         )
+
+    def on_pending_event(event: dict) -> None:
+        event_type = event.get("type", "LIMIT_UPDATE")
+        leg = event.get("leg", "?")
+        price = event.get("price", "")
+        if event_type == "LIMIT_FILLED":
+            message = (
+                f"✅ سفارش لیمیت {leg} پر شد | {event.get('symbol', '')}\n"
+                f"قیمت اجرا: {price}\n"
+                "ورود در حساب دمو ثبت شد؛ سفارش دوم مستقل باقی می‌ماند."
+            )
+        else:
+            message = (
+                f"⚪ سفارش لیمیت {leg} لغو شد | {event.get('symbol', '')}\n"
+                f"قیمت سفارش: {price}\n"
+                f"علت: {event.get('reason', 'لغو/انقضا')}"
+            )
+        notify(message)
 
     def on_trade_event(event: dict) -> None:
         kind = event.get("type", "UPDATE")
@@ -203,6 +277,7 @@ async def run_crypto_scanner(settings: Settings) -> None:
         candidate_limit=settings.scanner_candidate_limit,
         on_signal=on_signal,
         on_trade_event=on_trade_event,
+        on_pending_event=on_pending_event,
     )
     logger.info("Pine strategy scanner started; manual symbols only; demo-only.")
     try:
@@ -223,6 +298,7 @@ async def main() -> None:
         leverage=settings.demo_leverage,
     ))
     runtime.storage = store
+    runtime.pending_limits = store.load_pending_setups()
     # Keep the user's manually selected symbols and the existing demo ledger.
     runtime.manual_symbols = store.load_manual_symbols()
     runtime.selected_symbols = []
