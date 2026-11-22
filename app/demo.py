@@ -80,9 +80,9 @@ class DemoAccount:
         return max(0.0, self.balance - self.margin_used)
 
     def open_position(self, symbol: str, side: Side, entry: float, stop: float,
-                      opened_at: str | None = None, risk_percent: float = 1.0,
-                      risk_reward: float = 2.5) -> DemoPosition:
-        """Open a Pine-style demo market entry sized by account risk, with one RR target."""
+                      opened_at: str | None = None, risk_percent: float | None = None,
+                      risk_reward: float | None = None) -> DemoPosition:
+        """Open either a legacy fixed-margin position or a Pine-style risk-sized position."""
         if symbol in self.positions and not self.positions[symbol].closed:
             raise ValueError(f"An open demo position already exists for {symbol}.")
         if entry <= 0 or stop <= 0:
@@ -91,30 +91,47 @@ class DemoAccount:
             raise ValueError("Long stop must be below entry.")
         if side is Side.SHORT and stop <= entry:
             raise ValueError("Short stop must be above entry.")
-        if not 0 < risk_percent <= 100 or risk_reward <= 0:
-            raise ValueError("Risk percent and risk/reward must be positive.")
-        risk_distance = abs(entry - stop)
+
+        risk = abs(entry - stop)
         assert self.balance is not None
-        risk_cash = self.balance * risk_percent / 100.0
-        qty = risk_cash / risk_distance
-        notional = qty * entry
-        margin = notional / self.leverage
-        if self.free_margin < margin:
-            raise ValueError("Insufficient free demo margin for the Pine risk-based position size.")
-        fee = notional * self.fee_rate
+        if risk_percent is None and risk_reward is None:
+            # Keep the old public API stable for legacy positions and existing
+            # ledger records. The Pine signal path passes both values explicitly.
+            if self.free_margin < self.margin_per_trade:
+                raise ValueError("Insufficient free demo margin.")
+            qty = self.notional / entry
+            notional = self.notional
+            margin = self.margin_per_trade
+            fee = notional * self.fee_rate
+            targets = ((entry + risk, entry + 2 * risk, entry + 3 * risk)
+                       if side is Side.LONG else
+                       (entry - risk, entry - 2 * risk, entry - 3 * risk))
+            single_target = False
+        else:
+            if risk_percent is None or risk_reward is None or not 0 < risk_percent <= 100 or risk_reward <= 0:
+                raise ValueError("Risk percent and risk/reward must be positive.")
+            risk_cash = self.balance * risk_percent / 100.0
+            qty = risk_cash / risk
+            notional = qty * entry
+            margin = notional / self.leverage
+            if self.free_margin < margin:
+                raise ValueError("Insufficient free demo margin for the Pine risk-based position size.")
+            fee = notional * self.fee_rate
+            target = (entry + risk * risk_reward if side is Side.LONG
+                      else entry - risk * risk_reward)
+            targets = (target, target, target)
+            single_target = True
+
         self.balance -= fee
-        target = (entry + risk_distance * risk_reward if side is Side.LONG
-                  else entry - risk_distance * risk_reward)
         position = DemoPosition(
             symbol=symbol, side=side, entry=entry, stop=stop, initial_stop=stop,
             quantity_initial=qty, quantity_remaining=qty,
-            tp1=target, tp2=target, tp3=target,
+            tp1=targets[0], tp2=targets[1], tp3=targets[2],
             opened_at=opened_at or datetime.now(timezone.utc).isoformat(),
-            margin_allocated=margin, single_target=True,
+            margin_allocated=margin, single_target=single_target,
         )
         self.positions[symbol] = position
         return position
-
     def add_limit_fill(self, symbol: str, side: Side, entry: float, stop: float, opened_at: str | None = None, leg_number: int = 1) -> DemoPosition:
         """Add one configured-margin simulated fill to a single aggregated position."""
         if entry <= 0 or stop <= 0:
