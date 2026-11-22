@@ -137,7 +137,7 @@ class DemoAccount:
         )
         self.positions[symbol] = position
         return position
-    def add_limit_fill(self, symbol: str, side: Side, entry: float, stop: float, opened_at: str | None = None, leg_number: int = 1) -> DemoPosition:
+    def add_limit_fill(self, symbol: str, side: Side, entry: float, stop: float, opened_at: str | None = None, leg_number: int = 1, risk_reward: float = 3.0) -> DemoPosition:
         """Add one configured-margin simulated fill to a single aggregated position."""
         if entry <= 0 or stop <= 0:
             raise ValueError("Entry and stop must be positive.")
@@ -165,9 +165,14 @@ class DemoAccount:
             position.quantity_remaining += new_qty
             position.margin_allocated = allocated + margin
             risk = abs(entry - stop)
-            targets_for_leg = ((entry + risk, entry + 2 * risk, entry + 3 * risk)
-                               if side is Side.LONG else
-                               (entry - risk, entry - 2 * risk, entry - 3 * risk))
+            if risk_reward < 2.0:
+                raise ValueError("Three-target demo mode requires a final RR of at least 2.0.")
+            direction = 1.0 if side is Side.LONG else -1.0
+            targets_for_leg = (
+                entry + direction * risk,
+                entry + direction * risk * 2.0,
+                entry + direction * risk * risk_reward,
+            )
             position.legs.append({
                 "number": leg_number, "entry": entry, "stop": stop,
                 "quantity_initial": new_qty, "quantity_remaining": new_qty,
@@ -175,7 +180,11 @@ class DemoAccount:
                 "tp1_done": False, "tp2_done": False, "tp3_done": False,
             })
             aggregate_risk = abs(position.entry - position.initial_stop)
-            targets = ((position.entry + aggregate_risk, position.entry + 2 * aggregate_risk, position.entry + 3 * aggregate_risk) if side is Side.LONG else (position.entry - aggregate_risk, position.entry - 2 * aggregate_risk, position.entry - 3 * aggregate_risk))
+            targets = (
+                position.entry + direction * aggregate_risk,
+                position.entry + direction * aggregate_risk * 2.0,
+                position.entry + direction * aggregate_risk * risk_reward,
+            )
             position.tp1, position.tp2, position.tp3 = targets
             assert self.balance is not None
             self.balance -= margin * self.leverage * self.fee_rate
@@ -184,7 +193,14 @@ class DemoAccount:
             raise ValueError("Insufficient free demo margin.")
         qty = margin * self.leverage / entry
         risk = abs(entry - stop)
-        targets = ((entry + risk, entry + 2 * risk, entry + 3 * risk) if side is Side.LONG else (entry - risk, entry - 2 * risk, entry - 3 * risk))
+        if risk_reward < 2.0:
+            raise ValueError("Three-target demo mode requires a final RR of at least 2.0.")
+        direction = 1.0 if side is Side.LONG else -1.0
+        targets = (
+            entry + direction * risk,
+            entry + direction * risk * 2.0,
+            entry + direction * risk * risk_reward,
+        )
         assert self.balance is not None
         self.balance -= margin * self.leverage * self.fee_rate
         position = DemoPosition(
