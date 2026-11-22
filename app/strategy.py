@@ -65,16 +65,18 @@ class StrategyConfig:
     min_tick: float = 0.00000001
     enable_rsi_divergence: bool = True
     rsi_length: int = 14
-    rsi_divergence_pivot_length: int = 5
+    rsi_divergence_pivot_length: int | None = None
     rsi_divergence_lookback: int = 20
 
     def __post_init__(self) -> None:
         for name in ("pivot4", "body_len", "ob_search", "max_stored_ob", "ob_atr_len",
                      "pivot15", "max_wait", "atr_len", "max_bars_since_touch",
                      "trendline_pullback_max_wait", "sma_length",
-                     "rsi_length", "rsi_divergence_pivot_length", "rsi_divergence_lookback"):
+                     "rsi_length", "rsi_divergence_lookback"):
             if getattr(self, name) < 1:
                 raise ValueError(f"{name} must be positive")
+        if self.rsi_divergence_pivot_length is not None and self.rsi_divergence_pivot_length < 1:
+            raise ValueError("rsi_divergence_pivot_length must be positive when set")
         if self.min_tick <= 0:
             raise ValueError("min_tick must be positive")
 
@@ -332,10 +334,11 @@ class OrderBlockStrategy:
         candidate = idx-self.cfg.pivot15
         if candidate >= 0:
             candidate_rsi = self._rsi_values[candidate] if candidate < len(self._rsi_values) else None
-            div_candidate = idx-self.cfg.rsi_divergence_pivot_length
+            div_pivot_len = self.cfg.rsi_divergence_pivot_length or self.cfg.pivot15
+            div_candidate = idx-div_pivot_len
             if self.cfg.enable_rsi_divergence and div_candidate >= 0:
                 candidate_rsi = self._rsi_values[div_candidate] if div_candidate < len(self._rsi_values) else None
-                if candidate_rsi is not None and self._pivot_low(bars, div_candidate, self.cfg.rsi_divergence_pivot_length, self.cfg.rsi_divergence_pivot_length):
+                if candidate_rsi is not None and self._pivot_low(bars, div_candidate, div_pivot_len, div_pivot_len):
                     if ((self._previous_divergence_price_low is not None or self.last_pl15 is not None) and self._previous_rsi_pivot_low is not None
                             and bars[div_candidate].low < (self._previous_divergence_price_low if self._previous_divergence_price_low is not None else self.last_pl15)
                             and candidate_rsi > self._previous_rsi_pivot_low):
