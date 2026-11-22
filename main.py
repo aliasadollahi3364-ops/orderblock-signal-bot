@@ -301,16 +301,21 @@ async def run_crypto_scanner(settings: Settings) -> None:
 
                 n1, n2, n3 = targets(near)
                 d1, d2, d3 = targets(deep)
+                confirmed_at = datetime.fromtimestamp(
+                    created_at / 1000, timezone.utc
+                ).strftime("%Y-%m-%d %H:%M:%S UTC")
                 notify(
                     f"🚨 هشدار زودهنگام شکست خط روند + تأیید اردربلاک | {signal.symbol}\n"
                     f"جهت: {signal.side} | تایم‌فریم: ۱۵ دقیقه\n"
+                    f"واگرایی RSI: {signal.rsi_divergence} | RSI: {signal.rsi_value}\n"
                     f"لیمیت ۱ (نزدیک‌تر): {near:.8g} | TP1: {n1:.8g} | TP2: {n2:.8g} | TP3: {n3:.8g}\n"
                     f"لیمیت ۲ (عمیق‌تر): {deep:.8g} | TP1: {d1:.8g} | TP2: {d2:.8g} | TP3: {d3:.8g}\n"
-                    f"حد ضرر: {signal.stop:.8g}\n"
-                    "مارجین هر لیمیت: ۵ دلار | مارجین کل در صورت پرشدن هر دو: ۱۰ دلار\n"
-                    "وضعیت: منتظر پولبک و لمس قیمت‌ها؛ تا قبل از پرشدن، پوزیشن دمو باز نمی‌شود.\n"
-                    f"واگرایی RSI: {signal.rsi_divergence} | RSI: {signal.rsi_value}\n"
-                    "فقط حساب دمو؛ معاملات واقعی خاموش."
+                    f"حد ضرر ساختاری: {signal.stop:.8g}\n"
+                    "مارجین هر لیمیت: ۵ دلار | در صورت پرشدن هر دو: ۱۰ دلار مارجین\n"
+                    f"زمان تأیید: {confirmed_at}\n"
+                    "وضعیت: منتظر پولبک و لمس هر لیمیت؛ تا قبل از لمس، معامله‌ای در حساب دمو باز نیست.\n"
+                    "قیمت وزنی از OHLCV و حجم کندل‌ها تخمین زده شده؛ دفتر سفارش یا Volume Profile واقعی نیست.\n"
+                    "حساب دمو | معاملات واقعی: خاموش"
                 )
                 if bot is not None:
                     asyncio.run_coroutine_threadsafe(
