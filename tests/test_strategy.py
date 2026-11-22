@@ -173,8 +173,16 @@ def test_trendline_break_waits_for_a_later_pullback_and_confirmation():
 
     breakout = engine.on_15m_close(bar(2, 105.0, 107.0, 103.0, 106.0))
     assert breakout is None  # breakout alone is not an entry
+    warning = engine.last_early_warning
+    assert warning is not None
+    assert warning.side == "BUY"
+    assert warning.timestamp == 2
+    assert warning.trendline_level == 105.0
+    assert warning.ob_top == 108.0
+    assert warning.ob_bottom == 100.0
 
     pullback = engine.on_15m_close(bar(3, 100.0, 101.0, 99.8, 100.8))
+    assert engine.last_early_warning is None  # one warning, only on the breakout candle
     assert pullback is not None
     assert pullback.method == "TRENDLINE"
     assert pullback.side == "BUY"
