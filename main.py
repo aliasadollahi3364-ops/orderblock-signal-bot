@@ -184,10 +184,10 @@ async def run_crypto_scanner(settings: Settings) -> None:
                 tp2_2=deep_targets[1], tp3_2=deep_targets[2],
             )
             caption = (
-                f"📊 شکست خط روند + اردربلاک | {signal.symbol}\\n"
-                f"لیمیت ۱: {near:g} | لیمیت ۲: {deep:g}\\n"
-                f"حد ضرر: {signal.stop:g}\\n"
-                "اهداف روی نمودار برای هر ورود تخمینی‌اند؛ پس از پرشدن سفارش‌ها، میانگین ورود و اهداف مشترک پوزیشن به‌روز می‌شوند.\\n"
+                f"📊 شکست خط روند + اردربلاک | {signal.symbol}\n"
+                f"لیمیت ۱: {near:g} | لیمیت ۲: {deep:g}\n"
+                f"حد ضرر: {signal.stop:g}\n"
+                "اهداف روی نمودار برای هر ورود تخمینی‌اند؛ پس از پرشدن سفارش‌ها، میانگین ورود و اهداف مشترک پوزیشن به‌روز می‌شوند.\n"
                 "مارجین هر لیمیت: ۵ دلار | حداکثر مارجین کل: ۱۰ دلار. فقط حساب دمو."
             )
             await bot.send_photo(chat_id=settings.telegram_chat_id, photo=chart, caption=caption)
@@ -215,15 +215,15 @@ async def run_crypto_scanner(settings: Settings) -> None:
                 "DISABLED": "بررسی واگرایی خاموش",
             }.get(signal.rsi_divergence, "نامشخص")
             caption = (
-                f"📣 سیگنال جدید دمو | {signal.symbol}\\n"
-                f"جهت: {signal.side} | روش: {signal.method}\\n"
+                f"📣 سیگنال جدید دمو | {signal.symbol}\n"
+                f"جهت: {signal.side} | روش: {signal.method}\n"
                 f"واگرایی RSI: {rsi_label}"
                 + (f" | RSI: {signal.rsi_value:.1f}" if signal.rsi_value is not None else "")
-                + "\\n"
-                f"ورود: {signal.entry:g}\\nحد ضرر: {signal.stop:g}\\n"
-                f"TP1: {position.tp1:g} | TP2: {position.tp2:g} | TP3: {position.tp3:g}\\n"
-                f"زمان ورود: {entry_time}\\n"
-                "زمان خروج: پس از برخورد به حد ضرر یا اهداف، در پیام رویداد ثبت می‌شود.\\n"
+                + "\n"
+                f"ورود: {signal.entry:g}\nحد ضرر: {signal.stop:g}\n"
+                f"TP1: {position.tp1:g} | TP2: {position.tp2:g} | TP3: {position.tp3:g}\n"
+                f"زمان ورود: {entry_time}\n"
+                "زمان خروج: پس از برخورد به حد ضرر یا اهداف، در پیام رویداد ثبت می‌شود.\n"
                 "فقط حساب دمو؛ معاملات واقعی خاموش."
             )
             await bot.send_photo(chat_id=settings.telegram_chat_id, photo=chart, caption=caption)
