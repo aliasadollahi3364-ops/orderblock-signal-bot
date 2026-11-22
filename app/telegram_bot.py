@@ -17,6 +17,7 @@ MAIN_MENU = ReplyKeyboardMarkup(
         ["/status", "/demo"],
         ["/open", "/stats"],
         ["/history", "/panel"],
+        ["/symbols", "/add", "/remove"],
         ["🥇 همه اطلاعات طلا"],
         ["/help", "/menu"],
     ],
@@ -57,9 +58,8 @@ def _account_text() -> str:
         "💰 حساب دمو\n"
         f"موجودی اولیه: {acct.initial_balance:.2f} USDT\n"
         f"موجودی فعلی: {float(acct.balance or 0):.2f} USDT\n"
-        f"مارجین هر معامله: {acct.margin_per_trade:.2f} USDT\n"
-        f"اهرم: {acct.leverage:g}x\n"
-        f"ارزش اسمی هر معامله: {acct.notional:.2f} USDT\n"
+        "ریسک هر معامله: ۱٪ سرمایه بر اساس فاصله حدضرر\n"
+        f"اهرم محاسباتی: {acct.leverage:g}x\n"
         f"مارجین مصرف‌شده: {acct.margin_used:.2f} USDT\n"
         f"مارجین آزاد: {acct.free_margin:.2f} USDT\n"
         f"معاملات باز: {len(acct.open_positions)}\n"
@@ -86,8 +86,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await _authorized(update, context):
         await _reply_temporary(
             update, context,
-            "ربات آماده است. بخش‌های فعال: تحلیل طلای ۱۸ عیار و حساب دمو.\n"
-            "اسکن و سیگنال‌دهی ارزهای دیجیتال فعلاً غیرفعال است.",
+            "ربات آماده است. بخش‌های فعال: استراتژی اصلی WEEX، حساب دمو و تحلیل طلای ۱۸ عیار.\n"
+            "برای افزودن ارز: /add BTCUSDT | فهرست: /symbols | حذف: /remove BTCUSDT\n"
+            "ورودها مستقیم و فقط در حساب دمو هستند؛ معامله واقعی خاموش است.",
             reply_markup=MAIN_MENU,
         )
 
@@ -99,7 +100,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "وضعیت ربات: فعال\n"
             "تحلیل طلا: " + ("فعال" if runtime.gold_market is not None else "در انتظار کلید API") + "\n"
             "حساب دمو: فعال\n"
-            "اسکن ارزهای دیجیتال: غیرفعال\n"
+            f"اسکن WEEX: {runtime.scanner_state} | نمادهای دستی: {len(runtime.manual_symbols)}\n"
             "معاملات واقعی: خاموش",
         )
 
@@ -165,6 +166,63 @@ async def trade_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await _reply_temporary(update, context, "\n".join(lines))
 
 
+async def list_symbols(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    symbols = runtime.manual_symbols
+    text = "📋 نمادهای دستی برای اسکن:\\n" + ("\\n".join(symbols) if symbols else "هنوز نمادی اضافه نشده است.")
+    await _reply_temporary(update, context, text)
+
+
+async def add_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    if not context.args:
+        await _reply_temporary(update, context, "نمونه: /add BTCUSDT")
+        return
+    resolver = runtime.market_symbol_resolver
+    if resolver is None:
+        await _reply_temporary(update, context, "اتصال داده بازار هنوز آماده نیست؛ کمی بعد دوباره تلاش کن.")
+        return
+    requested = context.args[0]
+    try:
+        market = await asyncio.to_thread(resolver.resolve_manual_symbol, requested)
+    except Exception as exc:
+        await _reply_temporary(update, context, f"نماد معتبر یا فعال در WEEX پیدا نشد: {exc}")
+        return
+    canonical = market.symbol
+    if canonical not in runtime.manual_symbols:
+        runtime.manual_symbols.append(canonical)
+        runtime.manual_symbols.sort()
+        if runtime.storage is not None:
+            runtime.storage.save_manual_symbols(runtime.manual_symbols)
+    await _reply_temporary(update, context, f"✅ {canonical} به فهرست دستی اضافه شد. اسکن فقط روی نمادهای همین فهرست انجام می‌شود.")
+
+
+async def remove_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    if not context.args:
+        await _reply_temporary(update, context, "نمونه: /remove BTCUSDT")
+        return
+    requested = context.args[0].strip().upper().replace("-", "/").replace(" ", "")
+    resolver = runtime.market_symbol_resolver
+    canonical = None
+    if resolver is not None:
+        try:
+            market = await asyncio.to_thread(resolver.resolve_manual_symbol, requested)
+            canonical = market.symbol
+        except Exception:
+            pass
+    before = len(runtime.manual_symbols)
+    runtime.manual_symbols = [symbol for symbol in runtime.manual_symbols if symbol.upper() != requested and (canonical is None or symbol != canonical)]
+    if runtime.storage is not None:
+        runtime.storage.save_manual_symbols(runtime.manual_symbols)
+    if len(runtime.manual_symbols) == before:
+        await _reply_temporary(update, context, "این نماد در فهرست دستی نبود.")
+    else:
+        await _reply_temporary(update, context, "نماد از فهرست اسکن حذف شد. سابقه و معاملات دمو پاک نشدند.")
+
 async def gold_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized(update, context):
         return
@@ -186,7 +244,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             update, context,
             "/start - شروع\n/status - وضعیت ربات\n/gold - وضعیت تحلیل طلای ۱۸ عیار\n"
             "/demo - موجودی حساب دمو\n/open - معاملات باز دمو\n/stats - آمار دمو\n"
-            "/panel - پنل حساب دمو\n/history - تاریخچه دمو\n/menu - منوی اصلی\n/help - راهنما",
+            "/panel - پنل حساب دمو\n/history - تاریخچه دمو\n"
+            "/add نماد - افزودن نماد دستی\n/remove نماد - حذف نماد\n/symbols - فهرست نمادها\n"
+            "/menu - منوی اصلی\n/help - راهنما",
             reply_markup=MAIN_MENU,
         )
 
@@ -200,6 +260,7 @@ def build_telegram_application(token: str, allowed_chat_id: str) -> Application:
         ("start", start), ("menu", menu), ("status", status), ("gold", gold_status),
         ("demo", demo), ("open", open_positions), ("panel", demo_panel),
         ("history", trade_history), ("stats", stats), ("help", help_command),
+        ("add", add_symbol), ("remove", remove_symbol), ("symbols", list_symbols),
     ):
         application.add_handler(CommandHandler(command, callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_router))
