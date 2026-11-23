@@ -208,8 +208,7 @@ async def run_crypto_scanner(settings: Settings) -> None:
             logger.exception("Could not create/send signal chart for %s", signal.symbol)
 
     def on_early_warning(warning: EarlyWarning) -> None:
-        # All standalone early-warning messages are disabled.
-        # The confirmed two-limit alert is sent by on_signal and remains enabled.
+        # Standalone preliminary warnings remain disabled; only confirmed signals are sent.
         return
 
     def on_signal(signal) -> None:
