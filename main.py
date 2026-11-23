@@ -231,6 +231,9 @@ async def run_crypto_scanner(settings: Settings) -> None:
             logger.exception("Could not create/send signal chart for %s", signal.symbol)
 
     def on_early_warning(warning: EarlyWarning) -> None:
+        # Suppress preliminary trendline-break alerts; keep the confirmed OB alert.
+        if warning.kind != "ORDER_BLOCK_CONFIRMATION":
+            return
         side_label = "BUY" if warning.side == "BUY" else "SELL"
         warning_close = datetime.fromtimestamp(
             (warning.timestamp + 15 * 60 * 1000) / 1000, timezone.utc
