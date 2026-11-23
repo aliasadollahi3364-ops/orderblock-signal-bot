@@ -15,7 +15,6 @@ from app.config import Settings
 from app.demo import DemoAccount
 from app.gold_market import GoldMarketService, format_gold_signal
 from app.market_data import WeexMarketData
-from app.pending_limits import PendingLimit, PendingSetup, make_two_limit_prices
 from app.scanner import AutomaticScanner, open_demo_from_signal
 from app.runtime import runtime
 from app.storage import SQLiteStore
@@ -172,28 +171,6 @@ async def run_crypto_scanner(settings: Settings) -> None:
                 logger.exception("Crypto Telegram notification failed.")
         future.add_done_callback(report_error)
 
-    async def send_pending_signal_photo(signal, near, deep, near_targets, deep_targets) -> None:
-        if bot is None:
-            return
-        try:
-            rows = await asyncio.to_thread(market_data.fetch_ohlcv, signal.symbol, "15m", 80)
-            chart = make_signal_chart(
-                rows, signal.symbol, signal.side, near, signal.stop,
-                near_targets[0], near_targets[1], near_targets[2],
-                entry2=deep, tp1_2=deep_targets[0],
-                tp2_2=deep_targets[1], tp3_2=deep_targets[2],
-            )
-            caption = (
-                f"📊 شکست خط روند + اردربلاک | {signal.symbol}\n"
-                f"لیمیت ۱: {near:g} | لیمیت ۲: {deep:g}\n"
-                f"حد ضرر: {signal.stop:g}\n"
-                "اهداف روی نمودار برای هر ورود تخمینی‌اند؛ پس از پرشدن سفارش‌ها، میانگین ورود و اهداف مشترک پوزیشن به‌روز می‌شوند.\n"
-                "مارجین هر لیمیت: ۵ دلار | حداکثر مارجین کل: ۱۰ دلار. فقط حساب دمو."
-            )
-            await bot.send_photo(chat_id=settings.telegram_chat_id, photo=chart, caption=caption)
-        except Exception:
-            logger.exception("Could not create/send two-limit chart for %s", signal.symbol)
-
     async def send_signal_photo(signal, position) -> None:
         if bot is None:
             return
@@ -231,76 +208,12 @@ async def run_crypto_scanner(settings: Settings) -> None:
             logger.exception("Could not create/send signal chart for %s", signal.symbol)
 
     def on_early_warning(warning: EarlyWarning) -> None:
-        # All standalone early-warning messages are disabled.
-        # The confirmed two-limit alert is sent by on_signal and remains enabled.
+        # Standalone preliminary warnings remain disabled; only confirmed signals are sent.
         return
 
     def on_signal(signal) -> None:
-        # Two staged limits are used only for the trendline pullback path.
-        # Order-block entries remain direct Pine-strategy demo entries.
-        if signal.method == "TRENDLINE":
-            try:
-                if signal.ob_top <= signal.ob_bottom or signal.volume_weighted_price is None:
-                    raise ValueError("محدوده اردربلاک یا قیمت وزنی حجم برای سفارش لیمیت معتبر نیست.")
-                near, deep = make_two_limit_prices(
-                    signal.side, signal.ob_top, signal.ob_bottom,
-                    signal.volume_weighted_price, reference_price=signal.entry,
-                )
-                created_at = signal.timestamp + 15 * 60 * 1000
-                current_position = runtime.account.positions.get(signal.symbol)
-                position_open = current_position is not None and not current_position.closed
-                if not runtime.pending_limits.can_start_setup(
-                    signal.symbol, position_open=position_open, created_at=created_at
-                ):
-                    logger.info("Two-limit setup suppressed for %s: position/setup already active.", signal.symbol)
-                    return
-                setup = PendingSetup(
-                    symbol=signal.symbol,
-                    side=signal.side,
-                    created_at=created_at,
-                    expires_after_bars=runtime.strategy_config.trendline_pullback_max_wait,
-                    invalidation=signal.stop,
-                    stop=signal.stop,
-                    ob_top=signal.ob_top,
-                    ob_bottom=signal.ob_bottom,
-                    limits=[PendingLimit(1, near), PendingLimit(2, deep)],
-                )
-                runtime.pending_limits.add(setup)
-                runtime.persist_pending_limits()
-
-                def targets(entry: float) -> tuple[float, float, float]:
-                    risk = abs(entry - signal.stop)
-                    direction = 1.0 if signal.side == "BUY" else -1.0
-                    return (entry + direction * risk, entry + direction * 2 * risk,
-                            entry + direction * 3 * risk)
-
-                n1, n2, n3 = targets(near)
-                d1, d2, d3 = targets(deep)
-                confirmed_at = datetime.fromtimestamp(
-                    created_at / 1000, timezone.utc
-                ).strftime("%Y-%m-%d %H:%M:%S UTC")
-                notify(
-                    f"🚨 هشدار زودهنگام شکست خط روند + تأیید اردربلاک | {signal.symbol}\n"
-                    f"جهت: {signal.side} | تایم‌فریم: ۱۵ دقیقه\n"
-                    f"واگرایی RSI: {signal.rsi_divergence} | RSI: {signal.rsi_value}\n"
-                    f"لیمیت ۱ (نزدیک‌تر): {near:.8g} | TP1: {n1:.8g} | TP2: {n2:.8g} | TP3: {n3:.8g}\n"
-                    f"لیمیت ۲ (عمیق‌تر): {deep:.8g} | TP1: {d1:.8g} | TP2: {d2:.8g} | TP3: {d3:.8g}\n"
-                    f"حد ضرر ساختاری: {signal.stop:.8g}\n"
-                    "مارجین هر لیمیت: ۵ دلار | در صورت پرشدن هر دو: ۱۰ دلار مارجین\n"
-                    f"زمان تأیید: {confirmed_at}\n"
-                    "وضعیت: منتظر پولبک و لمس هر لیمیت؛ تا قبل از لمس، معامله‌ای در حساب دمو باز نیست.\n"
-                    "قیمت وزنی از OHLCV و حجم کندل‌ها تخمین زده شده؛ دفتر سفارش یا Volume Profile واقعی نیست.\n"
-                    "حساب دمو | معاملات واقعی: خاموش"
-                )
-                if bot is not None:
-                    asyncio.run_coroutine_threadsafe(
-                        send_pending_signal_photo(signal, near, deep, (n1, n2, n3), (d1, d2, d3)),
-                        loop,
-                    )
-            except Exception as exc:
-                logger.warning("Two-limit setup rejected for %s: %s", signal.symbol, exc)
-            return
-
+        # Both ORDER_BLOCK and TRENDLINE signals use the same direct demo entry.
+        # Strategy qualification remains entirely inside OrderBlockStrategy.
         position = open_demo_from_signal(signal)
         if position is None:
             return
@@ -336,6 +249,25 @@ async def run_crypto_scanner(settings: Settings) -> None:
                 f"علت: {event.get('reason', 'لغو/انقضا')}"
             )
         notify(message)
+
+    # Disable any still-unfilled legacy demo limit legs from the previous version.
+    # Filled/open demo positions and the trade ledger are deliberately preserved.
+    migration_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+    cancelled_legacy_legs = []
+    for symbol in list(runtime.pending_limits.setups):
+        cancelled_legacy_legs.extend(runtime.pending_limits.cancel(
+            symbol, migration_time,
+            "قابلیت سفارش لیمیت غیرفعال شد؛ سیگنال‌های جدید ورود مستقیم دارند",
+        ))
+    if cancelled_legacy_legs:
+        runtime.persist_pending_limits()
+        for item in cancelled_legacy_legs:
+            on_pending_event({
+                "symbol": item.symbol, "side": item.side,
+                "type": "LIMIT_CANCELLED", "leg": item.leg_number,
+                "price": item.price,
+                "reason": item.reason,
+            })
 
     def on_trade_event(event: dict) -> None:
         kind = event.get("type", "UPDATE")
