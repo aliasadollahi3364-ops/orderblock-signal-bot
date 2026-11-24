@@ -308,7 +308,7 @@ class AutomaticScanner:
                 log.exception("Pending limit processing failed for %s", symbol)
 
         ob_ranked: list[tuple[float, MarketCandidate]] = []
-        market_cache: dict[str, tuple[list[Candle], list[Candle], float]] = {}
+        market_cache: dict[str, tuple[list[Candle], list[Candle], float, StrategyConfig]] = {}
         for market in markets:
             try:
                 bars4 = _to_candles(self.market_data.fetch_ohlcv(market.symbol, "4h", 220))
@@ -333,7 +333,7 @@ class AutomaticScanner:
                     continue
                 score = market.rank_score / (1.0 + distance * 100.0)
                 ob_ranked.append((score, market))
-                market_cache[market.symbol] = (bars4, [], last_price)
+                market_cache[market.symbol] = (bars4, [], last_price, symbol_config)
             except Exception:
                 errors += 1
                 log.exception("4h OB screening failed for %s", market.symbol)
@@ -347,6 +347,7 @@ class AutomaticScanner:
         for market in selected_markets:
             try:
                 bars4 = market_cache[market.symbol][0]
+                symbol_config = market_cache[market.symbol][3]
                 bars15 = _to_candles(self.market_data.fetch_ohlcv(market.symbol, "15m", 3520))
                 engine = OrderBlockStrategy(market.symbol, symbol_config)
                 signal, early_warning = _ordered_feed(engine, bars4, bars15)
