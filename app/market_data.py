@@ -113,7 +113,12 @@ class WeexMarketData:
             matches.sort(key=lambda pair: (pair[1].get("settle") != self.quote_currency, pair[0]))
         symbol, market = matches[0]
 
-        ticker = self._fetch_ticker_cached(symbol) or {}
+        try:
+            ticker = self._fetch_ticker_cached(symbol) or {}
+        except Exception:
+            # Public ticker failure must not exclude a manually selected symbol;
+            # the scanner can fall back to its latest confirmed candle close.
+            ticker = {}
         last = float(ticker.get("last") or 0) or None
         volume = float(ticker.get("quoteVolume") or 0)
         spread, score = _ticker_score(
