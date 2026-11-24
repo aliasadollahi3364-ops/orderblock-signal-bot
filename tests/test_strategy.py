@@ -306,6 +306,9 @@ def test_rsi_bullish_divergence_is_detected_and_does_not_gate_signals():
     engine.last_pl15 = 10.0
     engine._previous_rsi_pivot_low = 35.0
     engine._previous_divergence_price_low = 10.0
+    engine._rsi_previous_close = 10.0
+    engine._rsi_seed_gains = [0.0]
+    engine._rsi_seed_losses = [1.0]
 
     engine.on_15m_close(bar(3, 10, 11, 9.5, 10.5))
 
