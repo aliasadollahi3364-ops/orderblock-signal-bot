@@ -4,6 +4,7 @@ No credentials or private account endpoints are used.
 """
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -18,6 +19,7 @@ class MarketCandidate:
     spread_pct: float | None
     rank_score: float
     last_price: float | None = None
+    tick_size: float = 0.00000001
 
 
 def _ticker_score(quote_volume: float, bid: float | None, ask: float | None) -> tuple[float | None, float]:
@@ -109,7 +111,7 @@ class WeexMarketData:
             # Prefer the canonical USDT-settled contract if the exchange exposes
             # more than one linear contract for the same base/quote.
             matches.sort(key=lambda pair: (pair[1].get("settle") != self.quote_currency, pair[0]))
-        symbol, _market = matches[0]
+        symbol, market = matches[0]
 
         ticker = self._fetch_ticker_cached(symbol) or {}
         last = float(ticker.get("last") or 0) or None
@@ -119,7 +121,38 @@ class WeexMarketData:
             float(ticker["bid"]) if ticker.get("bid") else None,
             float(ticker["ask"]) if ticker.get("ask") else None,
         )
-        return MarketCandidate(symbol, volume, spread, score, last)
+        tick_size = self._market_tick_size(market, last)
+        return MarketCandidate(symbol, volume, spread, score, last, tick_size)
+
+    def _market_tick_size(self, market: dict[str, Any], last_price: float | None) -> float:
+        """Resolve WEEX's minimum price increment for Pine syminfo.mintick parity."""
+        info = market.get("info") or {}
+        try:
+            price_place = info.get("pricePlace")
+            end_step = info.get("priceEndStep")
+            if price_place is not None and end_step is not None:
+                tick = float(end_step) * (10.0 ** -int(price_place))
+                if math.isfinite(tick) and tick > 0:
+                    return tick
+        except (TypeError, ValueError, OverflowError):
+            pass
+        precision = (market.get("precision") or {}).get("price")
+        try:
+            if precision is not None:
+                mode = getattr(self.exchange, "precisionMode", None)
+                if mode == getattr(ccxt, "TICK_SIZE", object()):
+                    tick = float(precision)
+                elif mode == getattr(ccxt, "DECIMAL_PLACES", object()):
+                    tick = 10.0 ** -int(precision)
+                elif mode == getattr(ccxt, "SIGNIFICANT_DIGITS", object()) and last_price and last_price > 0:
+                    tick = 10.0 ** (math.floor(math.log10(last_price)) - int(precision) + 1)
+                else:
+                    tick = 0.0
+                if math.isfinite(tick) and tick > 0:
+                    return tick
+        except (TypeError, ValueError, OverflowError):
+            pass
+        return 0.00000001
 
     def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int = 300) -> list[list[float]]:
         if limit < 1:
@@ -156,7 +189,9 @@ class WeexMarketData:
             rows = sorted({int(row[0]): row for row in rows}.values(), key=lambda row: int(row[0]))[-limit:]
         # 4h structure changes only at a 4h close; 15m entry data is refreshed
         # once per minute. CCXT also enforces the exchange's configured rate limit.
-        ttl = 900.0 if timeframe == "4h" else 60.0 if timeframe == "15m" else 15.0
+        # Refresh 4H candles promptly: a 15-minute cache can hide a just-confirmed
+        # HTF BOS/OB from the 15m strategy during the exact entry window.
+        ttl = 30.0 if timeframe == "4h" else 30.0 if timeframe == "15m" else 15.0
         self._ohlcv_cache[key] = (now + ttl, rows)
         return [row[:] for row in rows]
 
