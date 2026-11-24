@@ -76,7 +76,7 @@ def test_15m_touch_and_confirmation_emit_buy_with_ob_boundary_stop():
 
     assert signal is not None
     assert signal.side == "BUY"
-    assert signal.entry == 101.0
+    assert signal.entry == 101.002  # Pine strategy slippage: two symbol ticks
     assert signal.stop < 98.0
     assert ob.used
 
@@ -97,6 +97,7 @@ def test_new_pine_defaults_match_supplied_source():
     assert cfg.use_sma200_filter is True
     assert cfg.use_sma200_trendline_filter is True
     assert cfg.use_trailing_stop is False
+    assert cfg.divergence_pivot_length == 5
 
 
 def test_nearest_touched_ob_direction_uses_absolute_distance_and_skips_inactive_zones():
@@ -248,7 +249,8 @@ def test_rsi_bullish_divergence_is_detected_and_does_not_gate_signals():
     from app.strategy import OrderBlock
 
     cfg = StrategyConfig(
-        pivot15=1, atr_len=1, rsi_length=2, enable_rsi_divergence=True,
+        pivot15=1, atr_len=1, rsi_length=2, divergence_pivot_length=1,
+        enable_rsi_divergence=True,
         use_trend_filter=False, use_sma200_filter=False,
         use_choch_filter=False, use_retest_filter=False,
         use_confirm_strength=False, use_sma200_trendline_filter=False,
@@ -262,6 +264,7 @@ def test_rsi_bullish_divergence_is_detected_and_does_not_gate_signals():
     engine._rsi_values.extend([35.0, 42.0])
     engine.last_pl15 = 10.0
     engine._previous_rsi_pivot_low = 35.0
+    engine._previous_divergence_price_low = 10.0
 
     engine.on_15m_close(bar(3, 10, 11, 9.5, 10.5))
 
