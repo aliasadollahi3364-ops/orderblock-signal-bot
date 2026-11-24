@@ -9,6 +9,47 @@ def bar(ts, o, h, l, c):
     return Candle(ts, o, h, l, c)
 
 
+def test_incremental_atr_matches_full_wilder_recalculation():
+    from app.strategy import _atr
+
+    engine = OrderBlockStrategy("BTC/USDT", StrategyConfig(atr_len=3, enable_rsi_divergence=False))
+    bars = [
+        bar(1, 10, 12, 9, 11),
+        bar(2, 11, 13, 10, 12),
+        bar(3, 12, 13, 8, 9),
+        bar(4, 9, 11, 8, 10),
+        bar(5, 10, 14, 9, 13),
+        bar(6, 13, 14, 11, 12),
+    ]
+    for candle in bars:
+        engine.on_15m_close(candle)
+        expected = _atr(engine._tr15, 3)
+        if expected is None:
+            assert engine._atr15_value is None
+        else:
+            assert engine._atr15_value == expected
+
+
+def test_incremental_rsi_matches_wilder_calculation():
+    engine = OrderBlockStrategy("BTC/USDT", StrategyConfig(
+        atr_len=2, rsi_length=3, enable_rsi_divergence=False,
+    ))
+    closes = [10, 11, 10, 12, 11, 13, 12, 14]
+    for index, close in enumerate(closes):
+        engine.on_15m_close(bar(index + 1, close, close + 1, close - 1, close))
+
+    changes = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+    gains = [max(value, 0.0) for value in changes]
+    losses = [max(-value, 0.0) for value in changes]
+    avg_gain = sum(gains[:3]) / 3
+    avg_loss = sum(losses[:3]) / 3
+    for i in range(3, len(gains)):
+        avg_gain = (avg_gain * 2 + gains[i]) / 3
+        avg_loss = (avg_loss * 2 + losses[i]) / 3
+    expected = 100.0 if avg_loss == 0 else 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
+    assert engine._rsi_values[-1] == expected
+
+
 def test_confirmed_bullish_bos_creates_nearest_prior_bearish_order_block():
     cfg = StrategyConfig(pivot4=1, body_len=2, ob_search=3, ob_atr_len=1)
     engine = OrderBlockStrategy("BTC/USDT", cfg)
