@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -314,7 +314,8 @@ class AutomaticScanner:
                 bars4 = _to_candles(self.market_data.fetch_ohlcv(market.symbol, "4h", 220))
                 if len(bars4) < 30:
                     continue
-                htf_engine = OrderBlockStrategy(market.symbol, strategy_config)
+                symbol_config = replace(strategy_config, min_tick=market.tick_size)
+                htf_engine = OrderBlockStrategy(market.symbol, symbol_config)
                 now_ms = int(time.time() * 1000)
                 for bar in bars4:
                     if bar.timestamp + MS_4H <= now_ms:
@@ -342,7 +343,7 @@ class AutomaticScanner:
             try:
                 bars4 = market_cache[market.symbol][0]
                 bars15 = _to_candles(self.market_data.fetch_ohlcv(market.symbol, "15m", 3520))
-                engine = OrderBlockStrategy(market.symbol, strategy_config)
+                engine = OrderBlockStrategy(market.symbol, symbol_config)
                 signal, early_warning = _ordered_feed(engine, bars4, bars15)
                 if (early_warning is not None and
                         self._last_early_warning_bar.get(early_warning.symbol) != early_warning.timestamp):
