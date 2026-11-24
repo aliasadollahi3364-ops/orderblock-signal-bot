@@ -139,7 +139,8 @@ class WeexMarketData:
         precision = (market.get("precision") or {}).get("price")
         try:
             if precision is not None:
-                mode = getattr(self.exchange, "precisionMode", None)
+                exchange = getattr(self, "exchange", None)
+                mode = getattr(exchange, "precisionMode", None)
                 if mode == getattr(ccxt, "TICK_SIZE", object()):
                     tick = float(precision)
                 elif mode == getattr(ccxt, "DECIMAL_PLACES", object()):
