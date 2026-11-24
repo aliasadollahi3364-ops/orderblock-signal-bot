@@ -123,8 +123,8 @@ def test_pine_risk_reward_accepts_the_full_input_range():
         "BTC/USDT", Side.LONG, 100.0, 98.0,
         risk_percent=1.0, risk_reward=0.5,
     )
-    assert low_rr.tp1 == pytest.approx(100.0 + 2.0 / 3.0)
-    assert low_rr.tp2 == pytest.approx(100.0 + 4.0 / 3.0)
+    assert low_rr.tp1 == pytest.approx(100.0 + 1.0 / 3.0)
+    assert low_rr.tp2 == pytest.approx(100.0 + 2.0 / 3.0)
     assert low_rr.tp3 == pytest.approx(101.0)
 
 
