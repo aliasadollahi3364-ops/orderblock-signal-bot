@@ -119,10 +119,17 @@ class DemoAccount:
                 raise ValueError("Insufficient free demo margin for the Pine risk-based position size.")
             fee = notional * self.fee_rate
             direction = 1.0 if side is Side.LONG else -1.0
-            final_target = entry + direction * risk * risk_reward
-            # The supplied Pine strategy has one final TP and no staged exits.
-            targets = (final_target, final_target, final_target)
-            single_target = True
+            # The bot uses three staged demo targets: 1R, 2R, then the
+            # configured final risk/reward target. This is a bot-only exit
+            # convention; it does not change the Pine signal conditions.
+            first_r = 1.0 if risk_reward >= 2.0 else risk_reward / 3.0
+            second_r = 2.0 if risk_reward >= 2.0 else risk_reward * 2.0 / 3.0
+            targets = (
+                entry + direction * risk * first_r,
+                entry + direction * risk * second_r,
+                entry + direction * risk * risk_reward,
+            )
+            single_target = False
 
         self.balance -= fee
         position = DemoPosition(
