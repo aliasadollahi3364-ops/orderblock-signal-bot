@@ -322,6 +322,11 @@ class AutomaticScanner:
                         htf_engine.on_4h_close(bar)
                 last_price = market.last_price
                 if last_price is None or last_price <= 0:
+                    last_price = next((
+                        bar.close for bar in reversed(bars4)
+                        if bar.timestamp + MS_4H <= now_ms
+                    ), None)
+                if last_price is None or last_price <= 0:
                     continue
                 distance = _active_ob_distance(htf_engine, last_price)
                 if distance is None:
