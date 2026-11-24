@@ -390,6 +390,7 @@ class OrderBlockStrategy:
                     self._previous_divergence_price_high = price
                     self._previous_rsi_pivot_high = candidate_rsi
         candidate = idx-self.cfg.pivot15
+        if candidate >= 0:
             if self._pivot_high(bars, candidate, self.cfg.pivot15, self.cfg.pivot15):
                 self.prev_ph15, self.prev_ph15_bar = self.last_ph15, self.last_ph15_bar
                 self.last_ph15, self.last_ph15_bar = bars[candidate].high, candidate
