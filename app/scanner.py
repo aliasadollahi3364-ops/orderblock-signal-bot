@@ -427,7 +427,7 @@ class AutomaticScanner:
 
 
 def open_demo_from_signal(signal: Signal):
-    """Open a risk-sized internal demo position with three partial targets; no exchange orders."""
+    """Open a risk-sized internal demo position with the Pine final target; no exchange orders."""
     side = Side.LONG if signal.side == "BUY" else Side.SHORT
     try:
         entry_time = datetime.fromtimestamp((signal.timestamp + MS_15M) / 1000, timezone.utc).isoformat()
