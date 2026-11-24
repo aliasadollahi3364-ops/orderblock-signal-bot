@@ -37,17 +37,29 @@ def make_signal_chart(rows, symbol: str, side: str, entry: float, stop: float,
         draw.line((x, y(high), x, y(lowp)), fill=color, width=3)
         y1, y2 = sorted((y(op), y(close)))
         draw.rectangle((x - max(2, int(step * .28)), y1, x + max(2, int(step * .28)), max(y1 + 2, y2)), fill=color)
-    levels = [
-        ("L1 ENTRY", entry, "#ffffff"), ("STOP", stop, "#ff5252"),
-        ("L1 TP1", tp1, "#00c853"), ("L1 TP2", tp2, "#00c853"), ("L1 TP3", tp3, "#00c853"),
-    ]
-    if entry2 is not None:
+    levels = [("ENTRY", entry, "#ffffff"), ("STOP", stop, "#ff5252")]
+    if tp1 == tp2 == tp3:
+        levels.append(("TP", tp1, "#00c853"))
+    else:
         levels.extend([
-            ("L2 ENTRY", entry2, "#ffd54f"),
-            ("L2 TP1", tp1_2 if tp1_2 is not None else tp1, "#80cbc4"),
-            ("L2 TP2", tp2_2 if tp2_2 is not None else tp2, "#80cbc4"),
-            ("L2 TP3", tp3_2 if tp3_2 is not None else tp3, "#80cbc4"),
+            ("L1 TP1", tp1, "#00c853"), ("L1 TP2", tp2, "#00c853"),
+            ("L1 TP3", tp3, "#00c853"),
         ])
+    if entry2 is not None:
+        levels.append(("L2 ENTRY", entry2, "#ffd54f"))
+        second_targets = (
+            tp1_2 if tp1_2 is not None else tp1,
+            tp2_2 if tp2_2 is not None else tp2,
+            tp3_2 if tp3_2 is not None else tp3,
+        )
+        if second_targets[0] == second_targets[1] == second_targets[2]:
+            levels.append(("L2 TP", second_targets[0], "#80cbc4"))
+        else:
+            levels.extend([
+                ("L2 TP1", second_targets[0], "#80cbc4"),
+                ("L2 TP2", second_targets[1], "#80cbc4"),
+                ("L2 TP3", second_targets[2], "#80cbc4"),
+            ])
     for label, price, color in levels:
         yy = y(price)
         draw.line((left, yy, right, yy), fill=color, width=2)
