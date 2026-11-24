@@ -12,6 +12,19 @@ def test_market_candidate_retains_ticker_last_price():
     candidate = MarketCandidate("BTC/USDT:USDT", 1000, 0.05, 1050, 65000)
     assert candidate.last_price == 65000
 
+def test_market_candidate_defaults_tick_size_for_legacy_callers():
+    candidate = MarketCandidate("BTC/USDT:USDT", 1000, 0.05, 1050, 65000)
+    assert candidate.tick_size == 0.00000001
+
+
+def test_weex_tick_size_uses_exchange_price_place_and_end_step():
+    from app.market_data import WeexMarketData
+
+    instance = WeexMarketData.__new__(WeexMarketData)
+    assert instance._market_tick_size(
+        {"info": {"pricePlace": "4", "priceEndStep": "5"}}, 1.25
+    ) == pytest.approx(0.0005)
+
 def _market_data_for_manual_symbol(monkeypatch):
     from app.market_data import WeexMarketData
 
