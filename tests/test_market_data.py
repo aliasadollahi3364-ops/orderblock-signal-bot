@@ -61,6 +61,20 @@ def test_manual_symbol_resolves_ccxt_settled_swap_symbol(monkeypatch, requested)
     assert candidate.last_price == 1.25
 
 
+def test_manual_symbol_survives_ticker_endpoint_failure(monkeypatch):
+    instance = _market_data_for_manual_symbol(monkeypatch)
+
+    def unavailable(_symbol):
+        raise RuntimeError("ticker temporarily unavailable")
+
+    monkeypatch.setattr(instance, "_fetch_ticker_cached", unavailable)
+    candidate = instance.resolve_manual_symbol("SPCX")
+
+    assert candidate.symbol == "SPCX/USDT:USDT"
+    assert candidate.last_price is None
+    assert candidate.rank_score == 0.0
+
+
 def test_manual_symbol_rejects_inactive_or_non_swap_market(monkeypatch):
     instance = _market_data_for_manual_symbol(monkeypatch)
     instance._markets["SPCX/USDT:USDT"]["active"] = False
