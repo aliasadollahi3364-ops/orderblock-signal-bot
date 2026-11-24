@@ -196,17 +196,17 @@ async def run_crypto_scanner(settings: Settings) -> None:
                 "DISABLED": "نمایش واگرایی خاموش",
             }.get(signal.rsi_divergence, "نامشخص")
             caption = (
-                f"📣 سیگنال استراتژی | {signal.symbol}\\n"
-                f"جهت: {signal.side} | روش: {signal.method}\\n"
+                f"📣 سیگنال استراتژی | {signal.symbol}\n"
+                f"جهت: {signal.side} | روش: {signal.method}\n"
                 f"واگرایی RSI: {rsi_label}"
                 + (f" | RSI: {signal.rsi_value:.1f}" if signal.rsi_value is not None else "")
-                + "\\n"
-                f"ورود: {entry:g}\\nحد ضرر: {stop:g}\\n"
-                f"هدف نهایی ({signal.risk_reward:g}R): {target:g}\\n"
-                f"زمان سیگنال: {entry_time}\\n"
+                + "\n"
+                f"ورود: {entry:g}\nحد ضرر: {stop:g}\n"
+                f"هدف نهایی ({signal.risk_reward:g}R): {target:g}\n"
+                f"زمان سیگنال: {entry_time}\n"
                 + ("ثبت در حساب دمو انجام شد." if position is not None else
                    "سیگنال ارسال شد؛ ثبت معامله دمو به دلیل محدودیت حساب انجام نشد.")
-                + "\\nفقط حساب دمو؛ معاملات واقعی خاموش."
+                + "\nفقط حساب دمو؛ معاملات واقعی خاموش."
             )
             await bot.send_photo(chat_id=settings.telegram_chat_id, photo=chart, caption=caption)
         except Exception:
@@ -227,16 +227,16 @@ async def run_crypto_scanner(settings: Settings) -> None:
         stop = position.stop if position is not None else signal.stop
         target = entry + abs(entry - stop) * signal.risk_reward * (1 if signal.side == "BUY" else -1)
         notify(
-            f"📣 سیگنال استراتژی {signal.side} | {signal.symbol}\\n"
-            f"روش: {signal.method}\\n"
-            f"ورود: {entry:.8g}\\n"
-            f"حد ضرر: {stop:.8g}\\n"
-            f"هدف نهایی ({signal.risk_reward:g}R): {target:.8g}\\n"
-            f"زمان: {datetime.fromtimestamp((signal.timestamp + 15 * 60 * 1000) / 1000, timezone.utc).isoformat()}\\n"
-            f"واگرایی RSI: {signal.rsi_divergence} | RSI: {signal.rsi_value}\\n"
+            f"📣 سیگنال استراتژی {signal.side} | {signal.symbol}\n"
+            f"روش: {signal.method}\n"
+            f"ورود: {entry:.8g}\n"
+            f"حد ضرر: {stop:.8g}\n"
+            f"هدف نهایی ({signal.risk_reward:g}R): {target:.8g}\n"
+            f"زمان: {datetime.fromtimestamp((signal.timestamp + 15 * 60 * 1000) / 1000, timezone.utc).isoformat()}\n"
+            f"واگرایی RSI: {signal.rsi_divergence} | RSI: {signal.rsi_value}\n"
             + ("معامله در حساب دمو ثبت شد." if position is not None else
                "سیگنال صادر شد؛ ثبت دمو به دلیل محدودیت موجودی/مارجین انجام نشد.")
-            + "\\nفقط حساب دمو؛ بدون سفارش واقعی."
+            + "\nفقط حساب دمو؛ بدون سفارش واقعی."
         )
         if bot is not None:
             asyncio.run_coroutine_threadsafe(send_signal_photo(signal, position), loop)
