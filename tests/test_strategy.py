@@ -208,6 +208,7 @@ def test_trendline_break_waits_for_a_later_pullback_and_confirmation():
     engine.candles15.append(bar(1, 104.0, 105.0, 103.0, 104.0))
     engine._last_15m_timestamp = 1
     engine._tr15.append(2.0)
+    engine._atr15_value = 2.0
     engine.prev_ph15, engine.prev_ph15_bar = 110.0, -1
     engine.last_ph15, engine.last_ph15_bar = 105.0, 0
     engine.last_pl15 = 90.0
@@ -256,6 +257,7 @@ def test_trendline_entry_requires_touching_an_active_bullish_order_block():
     engine.candles15.append(bar(1, 104.0, 105.0, 103.0, 104.0))
     engine._last_15m_timestamp = 1
     engine._tr15.append(2.0)
+    engine._atr15_value = 2.0
     engine.prev_ph15, engine.prev_ph15_bar = 110.0, -1
     engine.last_ph15, engine.last_ph15_bar = 105.0, 0
     engine.last_pl15 = 90.0
@@ -276,6 +278,7 @@ def test_trendline_long_is_blocked_when_touched_order_block_is_bearish():
     engine.candles15.append(bar(1, 104.0, 105.0, 103.0, 104.0))
     engine._last_15m_timestamp = 1
     engine._tr15.append(2.0)
+    engine._atr15_value = 2.0
     engine.prev_ph15, engine.prev_ph15_bar = 110.0, -1
     engine.last_ph15, engine.last_ph15_bar = 105.0, 0
     engine.last_pl15 = 90.0
