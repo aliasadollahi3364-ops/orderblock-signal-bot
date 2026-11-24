@@ -122,9 +122,11 @@ class DemoAccount:
             # The bot uses three staged demo targets: 1R, 2R, then the
             # configured final risk/reward target. This is a bot-only exit
             # convention; it does not change the Pine signal conditions.
+            first_r = 1.0 if risk_reward >= 2.0 else risk_reward / 3.0
+            second_r = 2.0 if risk_reward >= 2.0 else risk_reward * 2.0 / 3.0
             targets = (
-                entry + direction * risk,
-                entry + direction * risk * 2.0,
+                entry + direction * risk * first_r,
+                entry + direction * risk * second_r,
                 entry + direction * risk * risk_reward,
             )
             single_target = False
