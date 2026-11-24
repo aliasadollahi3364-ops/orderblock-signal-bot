@@ -9,6 +9,47 @@ def bar(ts, o, h, l, c):
     return Candle(ts, o, h, l, c)
 
 
+def test_incremental_atr_matches_full_wilder_recalculation():
+    from app.strategy import _atr
+
+    engine = OrderBlockStrategy("BTC/USDT", StrategyConfig(atr_len=3, enable_rsi_divergence=False))
+    bars = [
+        bar(1, 10, 12, 9, 11),
+        bar(2, 11, 13, 10, 12),
+        bar(3, 12, 13, 8, 9),
+        bar(4, 9, 11, 8, 10),
+        bar(5, 10, 14, 9, 13),
+        bar(6, 13, 14, 11, 12),
+    ]
+    for candle in bars:
+        engine.on_15m_close(candle)
+        expected = _atr(engine._tr15, 3)
+        if expected is None:
+            assert engine._atr15_value is None
+        else:
+            assert engine._atr15_value == expected
+
+
+def test_incremental_rsi_matches_wilder_calculation():
+    engine = OrderBlockStrategy("BTC/USDT", StrategyConfig(
+        atr_len=2, rsi_length=3, enable_rsi_divergence=False,
+    ))
+    closes = [10, 11, 10, 12, 11, 13, 12, 14]
+    for index, close in enumerate(closes):
+        engine.on_15m_close(bar(index + 1, close, close + 1, close - 1, close))
+
+    changes = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+    gains = [max(value, 0.0) for value in changes]
+    losses = [max(-value, 0.0) for value in changes]
+    avg_gain = sum(gains[:3]) / 3
+    avg_loss = sum(losses[:3]) / 3
+    for i in range(3, len(gains)):
+        avg_gain = (avg_gain * 2 + gains[i]) / 3
+        avg_loss = (avg_loss * 2 + losses[i]) / 3
+    expected = 100.0 if avg_loss == 0 else 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
+    assert engine._rsi_values[-1] == expected
+
+
 def test_confirmed_bullish_bos_creates_nearest_prior_bearish_order_block():
     cfg = StrategyConfig(pivot4=1, body_len=2, ob_search=3, ob_atr_len=1)
     engine = OrderBlockStrategy("BTC/USDT", cfg)
@@ -76,7 +117,7 @@ def test_15m_touch_and_confirmation_emit_buy_with_ob_boundary_stop():
 
     assert signal is not None
     assert signal.side == "BUY"
-    assert signal.entry == 101.0
+    assert signal.entry == 101.002  # Pine strategy slippage: two symbol ticks
     assert signal.stop < 98.0
     assert ob.used
 
@@ -97,6 +138,7 @@ def test_new_pine_defaults_match_supplied_source():
     assert cfg.use_sma200_filter is True
     assert cfg.use_sma200_trendline_filter is True
     assert cfg.use_trailing_stop is False
+    assert cfg.divergence_pivot_length == 5
 
 
 def test_nearest_touched_ob_direction_uses_absolute_distance_and_skips_inactive_zones():
@@ -166,6 +208,7 @@ def test_trendline_break_waits_for_a_later_pullback_and_confirmation():
     engine.candles15.append(bar(1, 104.0, 105.0, 103.0, 104.0))
     engine._last_15m_timestamp = 1
     engine._tr15.append(2.0)
+    engine._atr15_value = 2.0
     engine.prev_ph15, engine.prev_ph15_bar = 110.0, -1
     engine.last_ph15, engine.last_ph15_bar = 105.0, 0
     engine.last_pl15 = 90.0
@@ -214,6 +257,7 @@ def test_trendline_entry_requires_touching_an_active_bullish_order_block():
     engine.candles15.append(bar(1, 104.0, 105.0, 103.0, 104.0))
     engine._last_15m_timestamp = 1
     engine._tr15.append(2.0)
+    engine._atr15_value = 2.0
     engine.prev_ph15, engine.prev_ph15_bar = 110.0, -1
     engine.last_ph15, engine.last_ph15_bar = 105.0, 0
     engine.last_pl15 = 90.0
@@ -234,6 +278,7 @@ def test_trendline_long_is_blocked_when_touched_order_block_is_bearish():
     engine.candles15.append(bar(1, 104.0, 105.0, 103.0, 104.0))
     engine._last_15m_timestamp = 1
     engine._tr15.append(2.0)
+    engine._atr15_value = 2.0
     engine.prev_ph15, engine.prev_ph15_bar = 110.0, -1
     engine.last_ph15, engine.last_ph15_bar = 105.0, 0
     engine.last_pl15 = 90.0
@@ -248,7 +293,8 @@ def test_rsi_bullish_divergence_is_detected_and_does_not_gate_signals():
     from app.strategy import OrderBlock
 
     cfg = StrategyConfig(
-        pivot15=1, atr_len=1, rsi_length=2, enable_rsi_divergence=True,
+        pivot15=1, atr_len=1, rsi_length=2, divergence_pivot_length=1,
+        enable_rsi_divergence=True,
         use_trend_filter=False, use_sma200_filter=False,
         use_choch_filter=False, use_retest_filter=False,
         use_confirm_strength=False, use_sma200_trendline_filter=False,
@@ -262,6 +308,10 @@ def test_rsi_bullish_divergence_is_detected_and_does_not_gate_signals():
     engine._rsi_values.extend([35.0, 42.0])
     engine.last_pl15 = 10.0
     engine._previous_rsi_pivot_low = 35.0
+    engine._previous_divergence_price_low = 10.0
+    engine._rsi_previous_close = 10.0
+    engine._rsi_seed_gains = [0.0]
+    engine._rsi_seed_losses = [1.0]
 
     engine.on_15m_close(bar(3, 10, 11, 9.5, 10.5))
 

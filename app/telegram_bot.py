@@ -247,17 +247,17 @@ STRATEGY_BOOL_SETTINGS = {
     "enable_trendline_signals": "سیگنال شکست خط روند",
     "use_sma200_trendline_filter": "فیلتر SMA200 خط روند",
     "use_sma200_filter": "فیلتر SMA200 اردربلاک",
-    "enable_rsi_divergence": "واگرایی RSI",
+    "enable_rsi_divergence": "نمایش واگرایی RSI (غیرفیلتر ورود)",
     "use_ob_boundary_sl": "حدضرر مرز اردربلاک",
 }
 STRATEGY_NUMBER_SETTINGS = {
     "risk_percent": ("ریسک هر معامله درصد", 0.1, 5.0),
-    "risk_reward": ("ضریب هدف نهایی R", 2.0, 5.0),
-    "sl_buffer_atr": ("ضریب فاصله حدضرر ATR", 0.1, 3.0),
-    "max_bars_since_touch": ("حداکثر کندل از لمس OB", 1, 100),
-    "trendline_pullback_max_wait": ("مهلت پولبک خط روند", 1, 48),
-    "min_choch_body_atr": ("حداقل قدرت CHoCH برحسب ATR", 0.1, 3.0),
-    "min_confirm_body_atr": ("حداقل قدرت کندل تأیید برحسب ATR", 0.05, 2.0),
+    "risk_reward": ("ضریب هدف نهایی R", 0.5, 10.0),
+    "sl_buffer_atr": ("ضریب فاصله حدضرر ATR", 0.0, 2.0),
+    "max_bars_since_touch": ("حداکثر کندل از لمس OB", 1, 200),
+    "trendline_pullback_max_wait": ("مهلت پولبک خط روند", 1, 100),
+    "min_choch_body_atr": ("حداقل قدرت CHoCH برحسب ATR", 0.0, 2.0),
+    "min_confirm_body_atr": ("حداقل قدرت کندل تأیید برحسب ATR", 0.0, 2.0),
 }
 
 def _strategy_settings_text() -> str:
@@ -267,7 +267,7 @@ def _strategy_settings_text() -> str:
         lines.append(f"{label}: {'روشن' if getattr(cfg, key) else 'خاموش'}")
     lines += [
         f"ریسک هر معامله: {cfg.risk_percent:g}٪",
-        f"هدف نهایی: {cfg.risk_reward:g}R (TP1=1R و TP2=2R ثابت)",
+        f"هدف نهایی: {cfg.risk_reward:g}R (یک هدف، مطابق Pine)",
         f"فاصله حدضرر ATR: {cfg.sl_buffer_atr:g}",
         f"حداکثر کندل از لمس OB: {cfg.max_bars_since_touch}",
         f"مهلت پولبک خط روند: {cfg.trendline_pullback_max_wait}",
@@ -280,7 +280,7 @@ def _strategy_settings_text() -> str:
         "/strategy risk_percent 1.0",
         "نام گزینه‌ها را دقیقاً مانند نمونه وارد کن.",
         "تنظیمات در SQLite ذخیره می‌شوند و بعد از راه‌اندازی مجدد باقی می‌مانند.",
-        "دو لیمیت، ساختار سه هدف و حساب دمو تغییر نمی‌کنند؛ معاملات واقعی خاموش است.",
+        "ورود مستقیم با یک هدف نهایی مطابق Pine؛ حساب دمو و معاملات واقعی خاموش است.",
     ]
     return "\n".join(lines)
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -308,18 +308,24 @@ class AutomaticScanner:
                 log.exception("Pending limit processing failed for %s", symbol)
 
         ob_ranked: list[tuple[float, MarketCandidate]] = []
-        market_cache: dict[str, tuple[list[Candle], list[Candle], float]] = {}
+        market_cache: dict[str, tuple[list[Candle], list[Candle], float, StrategyConfig]] = {}
         for market in markets:
             try:
                 bars4 = _to_candles(self.market_data.fetch_ohlcv(market.symbol, "4h", 220))
                 if len(bars4) < 30:
                     continue
-                htf_engine = OrderBlockStrategy(market.symbol, strategy_config)
+                symbol_config = replace(strategy_config, min_tick=market.tick_size)
+                htf_engine = OrderBlockStrategy(market.symbol, symbol_config)
                 now_ms = int(time.time() * 1000)
                 for bar in bars4:
                     if bar.timestamp + MS_4H <= now_ms:
                         htf_engine.on_4h_close(bar)
                 last_price = market.last_price
+                if last_price is None or last_price <= 0:
+                    last_price = next((
+                        bar.close for bar in reversed(bars4)
+                        if bar.timestamp + MS_4H <= now_ms
+                    ), None)
                 if last_price is None or last_price <= 0:
                     continue
                 distance = _active_ob_distance(htf_engine, last_price)
@@ -327,7 +333,7 @@ class AutomaticScanner:
                     continue
                 score = market.rank_score / (1.0 + distance * 100.0)
                 ob_ranked.append((score, market))
-                market_cache[market.symbol] = (bars4, [], last_price)
+                market_cache[market.symbol] = (bars4, [], last_price, symbol_config)
             except Exception:
                 errors += 1
                 log.exception("4h OB screening failed for %s", market.symbol)
@@ -341,8 +347,9 @@ class AutomaticScanner:
         for market in selected_markets:
             try:
                 bars4 = market_cache[market.symbol][0]
+                symbol_config = market_cache[market.symbol][3]
                 bars15 = _to_candles(self.market_data.fetch_ohlcv(market.symbol, "15m", 3520))
-                engine = OrderBlockStrategy(market.symbol, strategy_config)
+                engine = OrderBlockStrategy(market.symbol, symbol_config)
                 signal, early_warning = _ordered_feed(engine, bars4, bars15)
                 if (early_warning is not None and
                         self._last_early_warning_bar.get(early_warning.symbol) != early_warning.timestamp):
@@ -426,7 +433,7 @@ class AutomaticScanner:
 
 
 def open_demo_from_signal(signal: Signal):
-    """Open a risk-sized internal demo position with three partial targets; no exchange orders."""
+    """Open a risk-sized internal demo position with the Pine final target; no exchange orders."""
     side = Side.LONG if signal.side == "BUY" else Side.SHORT
     try:
         entry_time = datetime.fromtimestamp((signal.timestamp + MS_15M) / 1000, timezone.utc).isoformat()

@@ -164,7 +164,7 @@ class SQLiteStore:
                 for row in db.execute("SELECT payload FROM demo_events")
             }
             notify_types = {
-                "LIMIT_FILLED", "TP1", "TP2", "TP3", "STOP",
+                "LIMIT_FILLED", "TP", "TP1", "TP2", "TP3", "STOP",
                 "BREAK_EVEN_STOP", "TP1_TRAILING_STOP",
             }
             for event in events:

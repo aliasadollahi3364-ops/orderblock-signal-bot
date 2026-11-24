@@ -171,37 +171,42 @@ async def run_crypto_scanner(settings: Settings) -> None:
                 logger.exception("Crypto Telegram notification failed.")
         future.add_done_callback(report_error)
 
-    async def send_signal_photo(signal, position) -> None:
+    async def send_signal_photo(signal, position=None) -> None:
         if bot is None:
             return
         try:
             rows = await asyncio.to_thread(market_data.fetch_ohlcv, signal.symbol, "15m", 80)
+            entry = position.entry if position is not None else signal.entry
+            stop = position.stop if position is not None else signal.stop
+            target = (position.tp1 if position is not None else
+                      entry + abs(entry - stop) * signal.risk_reward *
+                      (1 if signal.side == "BUY" else -1))
             chart = make_signal_chart(
-                rows, signal.symbol, signal.side, signal.entry, signal.stop,
-                position.tp1, position.tp2, position.tp3,
+                rows, signal.symbol, signal.side, entry, stop, target, target, target,
             )
             entry_time = datetime.fromtimestamp(
                 (signal.timestamp + 15 * 60 * 1000) / 1000, timezone.utc
             ).strftime("%Y-%m-%d %H:%M:%S UTC")
             rsi_label = {
-                "BULLISH": "واگرایی صعودی هم‌جهت؛ تأیید اضافی",
-                "BEARISH": "واگرایی نزولی هم‌جهت؛ تأیید اضافی",
-                "OPPOSING_BEARISH": "واگرایی نزولی خلاف جهت؛ احتیاط",
-                "OPPOSING_BULLISH": "واگرایی صعودی خلاف جهت؛ احتیاط",
-                "NONE": "بدون واگرایی؛ سیگنال طبق شروط اصلی معتبر می‌ماند",
-                "DISABLED": "بررسی واگرایی خاموش",
+                "BULLISH": "واگرایی صعودی؛ نمایش کمکی",
+                "BEARISH": "واگرایی نزولی؛ نمایش کمکی",
+                "OPPOSING_BEARISH": "واگرایی نزولی خلاف جهت؛ نمایش کمکی",
+                "OPPOSING_BULLISH": "واگرایی صعودی خلاف جهت؛ نمایش کمکی",
+                "NONE": "واگرایی RSI مشاهده نشد",
+                "DISABLED": "نمایش واگرایی خاموش",
             }.get(signal.rsi_divergence, "نامشخص")
             caption = (
-                f"📣 سیگنال جدید دمو | {signal.symbol}\n"
+                f"📣 سیگنال استراتژی | {signal.symbol}\n"
                 f"جهت: {signal.side} | روش: {signal.method}\n"
                 f"واگرایی RSI: {rsi_label}"
                 + (f" | RSI: {signal.rsi_value:.1f}" if signal.rsi_value is not None else "")
                 + "\n"
-                f"ورود: {signal.entry:g}\nحد ضرر: {signal.stop:g}\n"
-                f"TP1: {position.tp1:g} | TP2: {position.tp2:g} | TP3: {position.tp3:g}\n"
-                f"زمان ورود: {entry_time}\n"
-                "زمان خروج: پس از برخورد به حد ضرر یا اهداف، در پیام رویداد ثبت می‌شود.\n"
-                "فقط حساب دمو؛ معاملات واقعی خاموش."
+                f"ورود: {entry:g}\nحد ضرر: {stop:g}\n"
+                f"هدف نهایی ({signal.risk_reward:g}R): {target:g}\n"
+                f"زمان سیگنال: {entry_time}\n"
+                + ("ثبت در حساب دمو انجام شد." if position is not None else
+                   "سیگنال ارسال شد؛ ثبت معامله دمو به دلیل محدودیت حساب انجام نشد.")
+                + "\nفقط حساب دمو؛ معاملات واقعی خاموش."
             )
             await bot.send_photo(chat_id=settings.telegram_chat_id, photo=chart, caption=caption)
         except Exception:
@@ -212,22 +217,26 @@ async def run_crypto_scanner(settings: Settings) -> None:
         return
 
     def on_signal(signal) -> None:
-        # Both ORDER_BLOCK and TRENDLINE signals use the same direct demo entry.
-        # Strategy qualification remains entirely inside OrderBlockStrategy.
-        position = open_demo_from_signal(signal)
-        if position is None:
+        # Pine allows one open position per symbol. Account-wide free-margin
+        # limits must not suppress the strategy alert itself.
+        existing = runtime.account.positions.get(signal.symbol)
+        if existing is not None and not existing.closed:
             return
+        position = open_demo_from_signal(signal)
+        entry = position.entry if position is not None else signal.entry
+        stop = position.stop if position is not None else signal.stop
+        target = entry + abs(entry - stop) * signal.risk_reward * (1 if signal.side == "BUY" else -1)
         notify(
-            f"📣 سیگنال دمو {signal.side} | {signal.symbol}\n"
+            f"📣 سیگنال استراتژی {signal.side} | {signal.symbol}\n"
             f"روش: {signal.method}\n"
-            f"ورود: {position.entry:.8g}\n"
-            f"حد ضرر اولیه: {position.stop:.8g}\n"
-            f"TP1 (1R): {position.tp1:.8g} | خروج ۳۳٪\n"
-            f"TP2 (2R): {position.tp2:.8g} | خروج ۳۳٪\n"
-            f"TP3 ({signal.risk_reward:g}R): {position.tp3:.8g} | خروج باقی‌مانده\n"
-            f"زمان: {position.opened_at}\n"
+            f"ورود: {entry:.8g}\n"
+            f"حد ضرر: {stop:.8g}\n"
+            f"هدف نهایی ({signal.risk_reward:g}R): {target:.8g}\n"
+            f"زمان: {datetime.fromtimestamp((signal.timestamp + 15 * 60 * 1000) / 1000, timezone.utc).isoformat()}\n"
             f"واگرایی RSI: {signal.rsi_divergence} | RSI: {signal.rsi_value}\n"
-            "پس از TP1 حد ضرر به ورود و پس از TP2 به TP1 منتقل می‌شود. فقط حساب دمو؛ بدون سفارش واقعی."
+            + ("معامله در حساب دمو ثبت شد." if position is not None else
+               "سیگنال صادر شد؛ ثبت دمو به دلیل محدودیت موجودی/مارجین انجام نشد.")
+            + "\nفقط حساب دمو؛ بدون سفارش واقعی."
         )
         if bot is not None:
             asyncio.run_coroutine_threadsafe(send_signal_photo(signal, position), loop)
