@@ -213,8 +213,45 @@ async def run_crypto_scanner(settings: Settings) -> None:
             logger.exception("Could not create/send signal chart for %s", signal.symbol)
 
     def on_early_warning(warning: EarlyWarning) -> None:
-        # Standalone preliminary warnings remain disabled; only confirmed signals are sent.
-        return
+        # Only notify after a 15m trendline retest candle has actually touched
+        # an active, direction-aligned order block and confirmed the direction.
+        if warning.kind != "TRENDLINE_BREAK_OB_TOUCH":
+            return
+        entry = warning.break_price
+        stop = warning.stop
+        risk = abs(entry - stop)
+        direction = 1.0 if warning.side == "BUY" else -1.0
+        rr = warning.risk_reward
+        first_r = 1.0 if rr >= 2.0 else rr / 3.0
+        second_r = 2.0 if rr >= 2.0 else rr * 2.0 / 3.0
+        tp1 = entry + direction * risk * first_r
+        tp2 = entry + direction * risk * second_r
+        tp3 = entry + direction * risk * rr
+        confirmed_at = datetime.fromtimestamp(
+            (warning.timestamp + 15 * 60 * 1000) / 1000, timezone.utc
+        ).strftime("%Y-%m-%d %H:%M:%S UTC")
+        rsi_label = {
+            "BULLISH": "واگرایی صعودی",
+            "BEARISH": "واگرایی نزولی",
+            "OPPOSING_BEARISH": "واگرایی نزولی خلاف جهت",
+            "OPPOSING_BULLISH": "واگرایی صعودی خلاف جهت",
+            "NONE": "واگرایی معتبر مشاهده نشد",
+            "DISABLED": "نمایش واگرایی خاموش",
+        }.get(warning.rsi_divergence, "نامشخص")
+        notify(
+            f"🚨 هشدار شکست خط روند + برخورد به اردربلاک | {warning.symbol}\n"
+            f"جهت: {warning.side} | تایم‌فریم: ۱۵ دقیقه\n"
+            f"وضعیت اردربلاک: برخورد واقعی کندل تأییدشده به محدوده اردربلاک هم‌جهت\n"
+            f"واگرایی RSI: {rsi_label}"
+            + (f" | RSI: {warning.rsi_value:.1f}" if warning.rsi_value is not None else "")
+            + "\n"
+            f"ورود پیشنهادی: {entry:.8g}\n"
+            f"حد ضرر ساختاری: {stop:.8g}\n"
+            f"TP1: {tp1:.8g} | TP2: {tp2:.8g} | TP3: {tp3:.8g}\n"
+            f"زمان تأیید: {confirmed_at}\n"
+            "وضعیت: هشدار تأیید شد؛ هیچ سفارش لیمیت یا سفارش دیگری از این هشدار ثبت نمی‌شود.\n"
+            "این هشدار به‌تنهایی معامله دمو باز نمی‌کند. حساب دمو | معاملات واقعی: خاموش"
+        )
 
     def on_signal(signal) -> None:
         # Pine allows one open position per symbol. Account-wide free-margin
