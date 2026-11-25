@@ -106,6 +106,9 @@ class EarlyWarning:
     ob_top: float
     ob_bottom: float
     kind: str = "TRENDLINE_BREAK"
+    risk_reward: float = 2.5
+    rsi_divergence: str = "NONE"
+    rsi_value: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -416,28 +419,10 @@ class OrderBlockStrategy:
             self._long_pending, self._long_level, self._long_break_bar = True, resistance_now, idx
             self._long_sl = self.last_pl15-atr*cfg.sl_buffer_atr if self.last_pl15 is not None else None
             self._short_pending, self._short_level, self._short_break_bar, self._short_sl = False, None, None, None
-            early_ob = next((ob for ob in reversed(self.order_blocks)
-                             if ob.active and not ob.used and ob.direction == 1), None)
-            if (early_ob is not None and self._long_sl is not None and self._long_sl < candle.close
-                    and (not cfg.use_sma200_trendline_filter or
-                         (sma is not None and candle.close > sma))):
-                self.last_early_warning = EarlyWarning(
-                    self.symbol, "BUY", candle.timestamp, candle.close,
-                    resistance_now, self._long_sl, early_ob.top, early_ob.bottom,
-                )
         if break_down:
             self._short_pending, self._short_level, self._short_break_bar = True, support_now, idx
             self._short_sl = self.last_ph15+atr*cfg.sl_buffer_atr if self.last_ph15 is not None else None
             self._long_pending, self._long_level, self._long_break_bar, self._long_sl = False, None, None, None
-            early_ob = next((ob for ob in reversed(self.order_blocks)
-                             if ob.active and not ob.used and ob.direction == -1), None)
-            if (early_ob is not None and self._short_sl is not None and self._short_sl > candle.close
-                    and (not cfg.use_sma200_trendline_filter or
-                         (sma is not None and candle.close < sma))):
-                self.last_early_warning = EarlyWarning(
-                    self.symbol, "SELL", candle.timestamp, candle.close,
-                    support_now, self._short_sl, early_ob.top, early_ob.bottom,
-                )
         tol = atr*cfg.trendline_retest_atr
         if self._long_pending and self._long_break_bar is not None and (idx-self._long_break_bar > cfg.trendline_pullback_max_wait or candle.close < self._long_level-tol):
             self._long_pending, self._long_level, self._long_break_bar, self._long_sl = False, None, None, None
@@ -531,6 +516,11 @@ class OrderBlockStrategy:
             # signal without a concrete active OB must never invent an entry zone.
             assert nearest_ob is not None
             rsi_state, rsi_value = self._signal_rsi_context("BUY", idx)
+            self.last_early_warning = EarlyWarning(
+                self.symbol, "BUY", candle.timestamp, candle.close,
+                self._long_level, self._long_sl, nearest_ob.top, nearest_ob.bottom,
+                "TRENDLINE_BREAK_OB_TOUCH", cfg.risk_reward, rsi_state, rsi_value,
+            )
             signal = Signal(self.symbol, "BUY", candle.timestamp, candle.close + 2.0 * cfg.min_tick, self._long_sl, atr,
                             nearest_ob.origin_time, nearest_ob.top, nearest_ob.bottom,
                             self.trend4h, sma, "TRENDLINE", cfg.risk_reward,
@@ -541,6 +531,11 @@ class OrderBlockStrategy:
         if tl_short:
             assert nearest_ob is not None
             rsi_state, rsi_value = self._signal_rsi_context("SELL", idx)
+            self.last_early_warning = EarlyWarning(
+                self.symbol, "SELL", candle.timestamp, candle.close,
+                self._short_level, self._short_sl, nearest_ob.top, nearest_ob.bottom,
+                "TRENDLINE_BREAK_OB_TOUCH", cfg.risk_reward, rsi_state, rsi_value,
+            )
             signal = Signal(self.symbol, "SELL", candle.timestamp, candle.close - 2.0 * cfg.min_tick, self._short_sl, atr,
                             nearest_ob.origin_time, nearest_ob.top, nearest_ob.bottom,
                             self.trend4h, sma, "TRENDLINE", cfg.risk_reward,
