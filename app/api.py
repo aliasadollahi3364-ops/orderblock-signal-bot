@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import timezone
+from html import escape
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
@@ -97,7 +98,7 @@ def gold_page():
 
     updated_text = str(updated) if updated else "نامشخص"
     error_html = (
-        f'<p class="error">وضعیت دریافت داده: {str(error)[:300]}</p>'
+        f'<p class="error">وضعیت دریافت داده: {escape(str(error)[:300])}</p>'
         if error else ""
     )
     html = f"""<!doctype html>
