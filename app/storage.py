@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from app.demo import DemoAccount, DemoPosition, Side
-from app.strategy import StrategyConfig
+from app.strategy_pine_v6 import StrategyConfig
 from app.pending_limits import PendingLimit, PendingLimitBook, PendingSetup, PendingStatus
 
 
