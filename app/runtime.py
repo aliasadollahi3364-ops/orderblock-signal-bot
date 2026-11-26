@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.demo import DemoAccount
-from app.strategy import StrategyConfig
+from app.strategy_pine_v6 import StrategyConfig
 from app.pending_limits import PendingLimitBook, PendingStatus
 
 
