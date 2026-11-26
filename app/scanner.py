@@ -16,7 +16,8 @@ from app.demo import Side
 from app.market_data import MarketCandidate
 from app.pending_limits import PendingStatus
 from app.runtime import runtime
-from app.strategy_pine_v6 import Candle, EarlyWarning, OrderBlockStrategy, Signal, StrategyConfig
+from app.strategy import Candle
+from app.strategy_pine_v6 import EarlyWarning, OrderBlockStrategy, Signal, StrategyConfig
 
 log = logging.getLogger(__name__)
 MS_15M = 15 * 60 * 1000
