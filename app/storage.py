@@ -277,7 +277,7 @@ class SQLiteStore:
                 return StrategyConfig()
             try:
                 values = json.loads(row["value"])
-                if "ob_atr_len" not in values or "enable_trendline_signals" not in values:
+                if "ob_atr_len" not in values or "enable_trendline_signals" not in values or "min_ob_score" not in values:
                     return StrategyConfig()
                 allowed = set(StrategyConfig.__dataclass_fields__)
                 values = {key: value for key, value in values.items() if key in allowed}
