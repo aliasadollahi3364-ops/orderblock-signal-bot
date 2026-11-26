@@ -18,7 +18,7 @@ from app.market_data import WeexMarketData
 from app.scanner import AutomaticScanner, open_demo_from_signal
 from app.runtime import runtime
 from app.storage import SQLiteStore
-from app.strategy import EarlyWarning, StrategyConfig
+from app.strategy_pine_v6 import EarlyWarning, StrategyConfig
 from app.telegram_bot import build_telegram_application
 
 logging.basicConfig(level=logging.INFO)
