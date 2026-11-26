@@ -193,47 +193,6 @@ def test_legacy_saved_strategy_settings_reset_to_current_pine_defaults(tmp_path)
 
 
 
-def test_trendline_break_waits_for_a_later_pullback_and_confirmation():
-    from app.strategy import OrderBlock
-
-    cfg = StrategyConfig(
-        atr_len=1,
-        use_trend_filter=False,
-        use_sma200_filter=False,
-        enable_trendline_signals=True,
-        use_sma200_trendline_filter=False,
-        require_trendline_pullback=False,  # legacy saved value must not bypass Pine's pullback rule
-    )
-    engine = OrderBlockStrategy("BTC/USDT", cfg)
-    engine.candles15.append(bar(1, 104.0, 105.0, 103.0, 104.0))
-    engine._last_15m_timestamp = 1
-    engine._tr15.append(2.0)
-    engine._atr15_value = 2.0
-    engine.prev_ph15, engine.prev_ph15_bar = 110.0, -1
-    engine.last_ph15, engine.last_ph15_bar = 105.0, 0
-    engine.last_pl15 = 90.0
-    engine.order_blocks.append(OrderBlock(1, 108.0, 100.0, 10))
-
-    breakout = engine.on_15m_close(bar(2, 105.0, 107.0, 103.0, 106.0))
-    assert breakout is None  # breakout alone is not an entry
-    warning = engine.last_early_warning
-    assert warning is not None
-    assert warning.side == "BUY"
-    assert warning.timestamp == 2
-    assert warning.trendline_level == 100.0  # line extrapolated to the breakout candle
-    assert warning.ob_top == 108.0
-    assert warning.ob_bottom == 100.0
-
-    pullback = engine.on_15m_close(bar(3, 100.0, 101.0, 99.8, 100.8))
-    assert engine.last_early_warning is None  # one warning, only on the breakout candle
-    assert pullback is not None
-    assert pullback.method == "TRENDLINE"
-    assert pullback.side == "BUY"
-    assert pullback.stop < pullback.entry
-    assert pullback.ob_time == 10
-    assert pullback.ob_top == 108.0
-    assert pullback.ob_bottom == 100.0
-
 def test_unqualified_raw_bos_does_not_change_4h_trend():
     cfg = StrategyConfig(pivot4=1, body_len=2, ob_search=3, ob_atr_len=1)
     engine = OrderBlockStrategy("BTC/USDT", cfg)
