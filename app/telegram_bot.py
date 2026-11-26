@@ -9,7 +9,7 @@ from telegram import ReplyKeyboardMarkup, Update
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 from app.runtime import runtime
-from app.strategy import StrategyConfig
+from app.strategy_pine_v6 import StrategyConfig
 
 logger = logging.getLogger(__name__)
 TEMP_MESSAGE_TTL_SECONDS = 120
