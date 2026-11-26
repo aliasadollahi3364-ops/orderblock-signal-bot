@@ -18,7 +18,7 @@ from app.market_data import WeexMarketData
 from app.scanner import AutomaticScanner, open_demo_from_signal
 from app.runtime import runtime
 from app.storage import SQLiteStore
-from app.strategy import EarlyWarning, StrategyConfig
+from app.strategy_pine_v6 import EarlyWarning, StrategyConfig
 from app.telegram_bot import build_telegram_application
 
 logging.basicConfig(level=logging.INFO)
@@ -178,11 +178,15 @@ async def run_crypto_scanner(settings: Settings) -> None:
             rows = await asyncio.to_thread(market_data.fetch_ohlcv, signal.symbol, "15m", 80)
             entry = position.entry if position is not None else signal.entry
             stop = position.stop if position is not None else signal.stop
-            target = (position.tp1 if position is not None else
-                      entry + abs(entry - stop) * signal.risk_reward *
-                      (1 if signal.side == "BUY" else -1))
+            direction = 1 if signal.side == "BUY" else -1
+            risk_distance = abs(entry - stop)
+            first_r = 1.0 if signal.risk_reward >= 2.0 else signal.risk_reward / 3.0
+            second_r = 2.0 if signal.risk_reward >= 2.0 else signal.risk_reward * 2.0 / 3.0
+            tp1 = position.tp1 if position is not None else entry + direction * risk_distance * first_r
+            tp2 = position.tp2 if position is not None else entry + direction * risk_distance * second_r
+            tp3 = position.tp3 if position is not None else entry + direction * risk_distance * signal.risk_reward
             chart = make_signal_chart(
-                rows, signal.symbol, signal.side, entry, stop, target, target, target,
+                rows, signal.symbol, signal.side, entry, stop, tp1, tp2, tp3,
             )
             entry_time = datetime.fromtimestamp(
                 (signal.timestamp + 15 * 60 * 1000) / 1000, timezone.utc
@@ -202,8 +206,9 @@ async def run_crypto_scanner(settings: Settings) -> None:
                 + (f" | RSI: {signal.rsi_value:.1f}" if signal.rsi_value is not None else "")
                 + "\n"
                 f"ورود: {entry:g}\nحد ضرر: {stop:g}\n"
-                f"هدف نهایی ({signal.risk_reward:g}R): {target:g}\n"
-                f"زمان سیگنال: {entry_time}\n"
+                f"TP1: {tp1:g} | TP2: {tp2:g} | TP3: {tp3:g}\n"
+                + (f"امتیاز اعتبار OB: {signal.ob_score:g}/100\n" if signal.ob_score is not None else "")
+                + f"زمان سیگنال: {entry_time}\n"
                 + ("ثبت در حساب دمو انجام شد." if position is not None else
                    "سیگنال ارسال شد؛ ثبت معامله دمو به دلیل محدودیت حساب انجام نشد.")
                 + "\nفقط حساب دمو؛ معاملات واقعی خاموش."
@@ -262,15 +267,23 @@ async def run_crypto_scanner(settings: Settings) -> None:
         position = open_demo_from_signal(signal)
         entry = position.entry if position is not None else signal.entry
         stop = position.stop if position is not None else signal.stop
-        target = entry + abs(entry - stop) * signal.risk_reward * (1 if signal.side == "BUY" else -1)
+        direction = 1 if signal.side == "BUY" else -1
+        risk_distance = abs(entry - stop)
+        first_r = 1.0 if signal.risk_reward >= 2.0 else signal.risk_reward / 3.0
+        second_r = 2.0 if signal.risk_reward >= 2.0 else signal.risk_reward * 2.0 / 3.0
+        tp1 = position.tp1 if position is not None else entry + direction * risk_distance * first_r
+        tp2 = position.tp2 if position is not None else entry + direction * risk_distance * second_r
+        tp3 = position.tp3 if position is not None else entry + direction * risk_distance * signal.risk_reward
+        method_label = {"ORDER_BLOCK": "OB", "ORDER_BLOCK_SWEEP": "OB + SWEEP", "TRENDLINE": "خط روند مستقل"}.get(signal.method, signal.method)
         notify(
             f"📣 سیگنال استراتژی {signal.side} | {signal.symbol}\n"
-            f"روش: {signal.method}\n"
+            f"روش: {method_label}\n"
             f"ورود: {entry:.8g}\n"
             f"حد ضرر: {stop:.8g}\n"
-            f"هدف نهایی ({signal.risk_reward:g}R): {target:.8g}\n"
-            f"زمان: {datetime.fromtimestamp((signal.timestamp + 15 * 60 * 1000) / 1000, timezone.utc).isoformat()}\n"
-            f"واگرایی RSI: {signal.rsi_divergence} | RSI: {signal.rsi_value}\n"
+            f"TP1: {tp1:.8g} | TP2: {tp2:.8g} | TP3: {tp3:.8g}\n"
+            + (f"امتیاز اعتبار OB: {signal.ob_score:g}/100\n" if signal.ob_score is not None else "")
+            + f"زمان: {datetime.fromtimestamp((signal.timestamp + 15 * 60 * 1000) / 1000, timezone.utc).isoformat()}\n"
+            + f"واگرایی RSI: {signal.rsi_divergence} | RSI: {signal.rsi_value}\n"
             + ("معامله در حساب دمو ثبت شد." if position is not None else
                "سیگنال صادر شد؛ ثبت دمو به دلیل محدودیت موجودی/مارجین انجام نشد.")
             + "\nفقط حساب دمو؛ بدون سفارش واقعی."

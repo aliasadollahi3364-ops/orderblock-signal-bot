@@ -17,7 +17,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from app.strategy import Candle, OrderBlockStrategy, Signal, StrategyConfig
+from app.strategy import Candle
+from app.strategy_pine_v6 import OrderBlockStrategy, Signal, StrategyConfig
 
 logger = logging.getLogger(__name__)
 

@@ -16,7 +16,8 @@ from app.demo import Side
 from app.market_data import MarketCandidate
 from app.pending_limits import PendingStatus
 from app.runtime import runtime
-from app.strategy import Candle, EarlyWarning, OrderBlockStrategy, Signal, StrategyConfig
+from app.strategy import Candle
+from app.strategy_pine_v6 import EarlyWarning, OrderBlockStrategy, Signal, StrategyConfig
 
 log = logging.getLogger(__name__)
 MS_15M = 15 * 60 * 1000
@@ -307,19 +308,26 @@ class AutomaticScanner:
                 errors += 1
                 log.exception("Pending limit processing failed for %s", symbol)
 
-        ob_ranked: list[tuple[float, MarketCandidate]] = []
+        # Evaluate every manually added symbol. Do not require an active OB here:
+        # a valid 15m trendline setup is an independent entry path.
         market_cache: dict[str, tuple[list[Candle], list[Candle], float, StrategyConfig]] = {}
-        for market in markets:
+        selected_markets: list[MarketCandidate] = []
+        ob_candidate_count = 0
+        now_ms = int(time.time() * 1000)
+        for market in markets[:self.candidate_limit]:
             try:
                 bars4 = _to_candles(self.market_data.fetch_ohlcv(market.symbol, "4h", 220))
                 if len(bars4) < 30:
                     continue
                 symbol_config = replace(strategy_config, min_tick=market.tick_size)
                 htf_engine = OrderBlockStrategy(market.symbol, symbol_config)
-                now_ms = int(time.time() * 1000)
                 for bar in bars4:
                     if bar.timestamp + MS_4H <= now_ms:
                         htf_engine.on_4h_close(bar)
+                ob_candidate_count += sum(
+                    1 for ob in htf_engine.order_blocks
+                    if ob.active and not ob.used and ob.score >= symbol_config.min_ob_score
+                )
                 last_price = market.last_price
                 if last_price is None or last_price <= 0:
                     last_price = next((
@@ -328,20 +336,12 @@ class AutomaticScanner:
                     ), None)
                 if last_price is None or last_price <= 0:
                     continue
-                distance = _active_ob_distance(htf_engine, last_price)
-                if distance is None:
-                    continue
-                score = market.rank_score / (1.0 + distance * 100.0)
-                ob_ranked.append((score, market))
+                selected_markets.append(market)
                 market_cache[market.symbol] = (bars4, [], last_price, symbol_config)
             except Exception:
                 errors += 1
-                log.exception("4h OB screening failed for %s", market.symbol)
+                log.exception("4h screening failed for %s", market.symbol)
 
-        ob_ranked.sort(key=lambda item: item[0], reverse=True)
-        # Only manually added symbols with an active, unused 4H order block
-        # proceed to 15m signal evaluation. No automatic candidates are added.
-        selected_markets = [market for _, market in ob_ranked]
         signals: list[Signal] = []
         runtime.scanner_state = "SCANNING_15M"
         for market in selected_markets:
@@ -422,7 +422,7 @@ class AutomaticScanner:
         runtime.signal_count += len(signals)
         runtime.last_scan_at = datetime.now(timezone.utc)
         runtime.scanner_state = "RUNNING" if not errors else "RUNNING_WITH_ERRORS"
-        return ScanSummary(len(markets), len(ob_ranked), len(selected_markets), len(signals), errors)
+        return ScanSummary(len(markets), ob_candidate_count, len(selected_markets), len(signals), errors)
 
     def run_forever(self, interval_seconds: int = 60) -> None:
         while True:

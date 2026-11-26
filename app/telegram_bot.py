@@ -9,7 +9,7 @@ from telegram import ReplyKeyboardMarkup, Update
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 from app.runtime import runtime
-from app.strategy import StrategyConfig
+from app.strategy_pine_v6 import StrategyConfig
 
 logger = logging.getLogger(__name__)
 TEMP_MESSAGE_TTL_SECONDS = 120
@@ -236,28 +236,29 @@ async def remove_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 STRATEGY_BOOL_SETTINGS = {
-    "use_trend_filter": "فیلتر روند",
-    "require_ob_touch": "الزام لمس اردربلاک",
-    "use_touch_freshness": "تازگی لمس اردربلاک",
-    "use_choch_filter": "فیلتر CHoCH",
-    "use_choch_strength": "قدرت کندل CHoCH",
-    "use_retest_filter": "فیلتر پولبک",
-    "use_confirm_candle": "کندل تأیید",
+    "use_trend_filter": "هم‌جهتی روند ۴ ساعته برای OB",
+    "require_ob_touch": "الزام لمس اولیه OB",
+    "use_touch_freshness": "تازگی لمس اولیه OB",
+    "use_choch_strength": "قدرت کندل تغییر ساختار",
     "use_confirm_strength": "قدرت کندل تأیید",
-    "enable_trendline_signals": "سیگنال شکست خط روند",
+    "enable_trendline_signals": "مسیر مستقل خط روند",
     "use_sma200_trendline_filter": "فیلتر SMA200 خط روند",
     "use_sma200_filter": "فیلتر SMA200 اردربلاک",
     "enable_rsi_divergence": "نمایش واگرایی RSI (غیرفیلتر ورود)",
     "use_ob_boundary_sl": "حدضرر مرز اردربلاک",
 }
 STRATEGY_NUMBER_SETTINGS = {
+    "min_ob_score": ("حداقل امتیاز OB", 0, 100),
     "risk_percent": ("ریسک هر معامله درصد", 0.1, 5.0),
     "risk_reward": ("ضریب هدف نهایی R", 0.5, 10.0),
     "sl_buffer_atr": ("ضریب فاصله حدضرر ATR", 0.0, 2.0),
-    "max_bars_since_touch": ("حداکثر کندل از لمس OB", 1, 200),
+    "max_bars_since_touch": ("حداکثر کندل از لمس اولیه OB", 1, 200),
     "trendline_pullback_max_wait": ("مهلت پولبک خط روند", 1, 100),
-    "min_choch_body_atr": ("حداقل قدرت CHoCH برحسب ATR", 0.0, 2.0),
+    "min_choch_body_atr": ("حداقل قدرت تغییر ساختار برحسب ATR", 0.0, 2.0),
     "min_confirm_body_atr": ("حداقل قدرت کندل تأیید برحسب ATR", 0.0, 2.0),
+    "retest_atr": ("تلورانس پولبک به OB برحسب ATR", 0.0, 2.0),
+    "trendline_touch_tolerance_atr": ("تلورانس پیوت سوم خط روند برحسب ATR", 0.05, 1.5),
+    "trendline_retest_atr": ("تلورانس پولبک خط روند برحسب ATR", 0.0, 2.0),
 }
 
 def _strategy_settings_text() -> str:
@@ -271,11 +272,15 @@ def _strategy_settings_text() -> str:
         f"فاصله حدضرر ATR: {cfg.sl_buffer_atr:g}",
         f"حداکثر کندل از لمس OB: {cfg.max_bars_since_touch}",
         f"مهلت پولبک خط روند: {cfg.trendline_pullback_max_wait}",
+        f"حداقل امتیاز اعتبار OB: {cfg.min_ob_score}/100",
+        "مسیر OB: تغییر ساختار + پولبک به خود محدوده OB + کندل تأیید (اجباری)",
+        "مسیر خط روند: ۳ پیوت معتبر + شکست + پولبک + کندل تأیید؛ مستقل از OB",
+        "شکار نقدینگی: عبور سایه از مرز OB و بسته‌شدن دوباره داخل محدوده؛ سپس تأیید کندل",
         f"قدرت CHoCH: {cfg.min_choch_body_atr:g} ATR",
         f"قدرت کندل تأیید: {cfg.min_confirm_body_atr:g} ATR",
         "",
         "تغییر روشن/خاموش:",
-        "/strategy use_choch_filter on یا off",
+        "/strategy enable_trendline_signals on یا off",
         "تغییر عددی:",
         "/strategy risk_percent 1.0",
         "نام گزینه‌ها را دقیقاً مانند نمونه وارد کن.",
@@ -291,7 +296,7 @@ async def strategy_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await _reply_temporary(update, context, _strategy_settings_text())
         return
     if len(context.args) != 2:
-        await _reply_temporary(update, context, "نمونه: /strategy use_choch_filter off یا /strategy risk_percent 1.0")
+        await _reply_temporary(update, context, "نمونه: /strategy enable_trendline_signals on یا /strategy min_ob_score 70")
         return
     key, raw_value = context.args[0].strip(), context.args[1].strip().lower()
     cfg = runtime.strategy_config or StrategyConfig()
@@ -308,7 +313,7 @@ async def strategy_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             value = float(raw_value)
             if not minimum <= value <= maximum:
                 raise ValueError(f"مقدار {key} باید بین {minimum} و {maximum} باشد.")
-            if key in {"max_bars_since_touch", "trendline_pullback_max_wait"}:
+            if key in {"max_bars_since_touch", "trendline_pullback_max_wait", "min_ob_score"}:
                 if not value.is_integer():
                     raise ValueError(f"{key} باید عدد صحیح باشد.")
                 value = int(value)
