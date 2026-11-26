@@ -33,7 +33,8 @@ class StrategyConfig:
     enable_trendline_signals:bool=True; use_sma200_trendline_filter:bool=True
     trendline_touch_tolerance_atr:float=.35; trendline_retest_atr:float=.15
     trendline_pullback_max_wait:int=12
-    require_trendline_pullback:bool=True  # mandatory by the Pine source\n    risk_percent:float=1.; risk_reward:float=2.5; sl_buffer_atr:float=2.
+    require_trendline_pullback:bool=True  # mandatory by the Pine source
+    risk_percent:float=1.; risk_reward:float=2.5; sl_buffer_atr:float=2.
     use_ob_boundary_sl:bool=True; use_trailing_stop:bool=False; trailing_atr_mult:float=1.5
     sma_length:int=200; use_sma200_filter:bool=True; min_tick:float=1e-8
     enable_rsi_divergence:bool=True; rsi_length:int=14
