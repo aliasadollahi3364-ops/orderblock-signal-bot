@@ -11,7 +11,14 @@ A Telegram-connected, web-managed **demo trading** bot for WEEX market data.
 
 ## Strategy source of truth
 
-The implementation follows the user's supplied Pine v6 strategy: confirmed 4H Order Blocks/BOS and two 15m entry methods. The ORDER_BLOCK path requires price to revisit a 4H OB, then a 15m CHoCH, retest and confirmation. The TRENDLINE path requires a valid 15m trendline break followed by a later pullback and confirmation; a breakout candle alone must never emit a signal. The trendline direction is gated by the nearest active 4H OB touched by the signal candle. Both methods use the source's 4H SMA200 filters. Do not merge older bot strategies or add filters absent from the source script.
+The crypto scanner ports `WEEX_OrderBlock_Trendline_Improved_v6.pine` and processes confirmed 4H and 15m candles only. It scans only symbols manually added by the user in Telegram.
+
+- **4H OB quality:** BOS 25 points, displacement 20, volume 0–15, freshness 15, FVG 10 and 4H SMA200 alignment 15; the default minimum accepted score is 70/100.
+- **Independent OB entry:** optional initial-touch/freshness checks, mandatory 15m CHoCH/BOS, a later retest of the OB zone, then a confirming candle.
+- **Liquidity sweep:** a wick crosses the OB edge and the candle closes back inside the zone; entry waits for a later confirmation candle. The stop is placed beyond the sweep extreme.
+- **Independent trendline entry:** three confirmed pivots validate the line; a candle must close beyond it, then price must pull back to the line and a confirming candle must close in the breakout direction. No OB or CHoCH is required for this route.
+- The OB and trendline routes use their respective 4H SMA200 settings. RSI divergence is informational and does not block entries.
+- No limit-entry orders are created. Entries are recorded directly in the internal demo account. Do not merge older bot strategies or add filters absent from the supplied Pine source.
 
 ## Demo trade management
 
