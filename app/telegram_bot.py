@@ -94,7 +94,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await _authorized(update, context):
         await _reply_temporary(
             update, context,
-            "ربات آماده است. بخش‌های فعال: استراتژی اصلی WEEX، حساب دمو و تحلیل طلای ۱۸ عیار.\n"
+            "ربات آماده است. استراتژی اصلی اردربلاک و استراتژی مستقل جمع‌آوری نقدینگی (۱۵ دقیقه) فعال هستند؛ تحلیل طلا نیز جداگانه اجرا می‌شود.\n"
             "برای افزودن ارز فقط نام آن را بفرست، مثلاً BTC یا RENDER؛ فهرست: /symbols | حذف: /remove BTCUSDT\n"
             "ورودها مستقیم و فقط در حساب دمو هستند؛ معامله واقعی خاموش است.",
             reply_markup=MAIN_MENU,
@@ -244,8 +244,8 @@ def _liquidity_status_text() -> str:
     state = "فعال" if runtime.liquidity_enabled else "خاموش"
     if account is None:
         return (
-            "💧 استراتژی جمع‌آوری نقدینگی\\n"
-            f"وضعیت اسکنر: {state} | تایم‌فریم: ۱۵ دقیقه\\n"
+            "💧 استراتژی جمع‌آوری نقدینگی\n"
+            f"وضعیت اسکنر: {state} | تایم‌فریم: ۱۵ دقیقه\n"
             "حساب دمو در حال آماده‌سازی است."
         )
     lines = [
@@ -276,7 +276,7 @@ def _liquidity_status_text() -> str:
         "/liquidity session on یا /liquidity session off",
         "فقط تایم‌فریم ۱۵ دقیقه؛ معاملات واقعی خاموش.",
     ]
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 async def liquidity_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -308,7 +308,7 @@ async def liquidity_settings(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 runtime.liquidity_account, runtime.liquidity_config or config,
                 runtime.liquidity_enabled, runtime.liquidity_cursors,
             )
-        await _reply_temporary(update, context, "✅ " + message + "\\n\\n" + _liquidity_status_text())
+        await _reply_temporary(update, context, "✅ " + message + "\n\n" + _liquidity_status_text())
     except (TypeError, ValueError) as exc:
         await _reply_temporary(update, context, f"تنظیم انجام نشد: {exc}")
 
@@ -437,6 +437,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "/demo - موجودی حساب دمو\n/open - معاملات باز دمو\n/stats - آمار دمو\n"
             "/panel - پنل حساب دمو\n/history - تاریخچه دمو\n"
             "فقط نام ارز را بفرست - افزودن نماد دستی (مثلاً BTC یا RENDER)\n/add نماد - افزودن با دستور\n/remove نماد - حذف نماد\n/symbols - فهرست نمادها\n"
+            "/liquidity - وضعیت و تنظیمات استراتژی جمع‌آوری نقدینگی\n"
             "/strategy - تنظیمات کلی استراتژی\n"
             "/strategy نام_گزینه on|off|عدد - تغییر تنظیم\n"
             "/menu - منوی اصلی\n/help - راهنما",
