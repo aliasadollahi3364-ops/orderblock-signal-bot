@@ -346,7 +346,16 @@ class LiquidityScanner:
                     sig=engine.on_bar(bar)
                     if sig is not None: generated[bar.timestamp]=sig
                 cursor=self.cursors.get(symbol)
-                if cursor is None: cursor=bars[-2].timestamp if len(bars)>1 else bars[-1].timestamp-BAR_MS
+                open_position=self.account.positions.get(symbol)
+                is_open=open_position is not None and not open_position.closed
+                oldest_cursor=bars[0].timestamp-BAR_MS
+                if cursor is None or cursor < bars[0].timestamp:
+                    if is_open and open_position.opened_at:
+                        entry_bar=int(datetime.fromisoformat(open_position.opened_at).timestamp()*1000)-BAR_MS
+                        cursor=max(cursor if cursor is not None else oldest_cursor, entry_bar)
+                    else:
+                        # Do not replay stale historical signals after a long outage or first install.
+                        cursor=bars[-2].timestamp if len(bars)>1 else bars[-1].timestamp-BAR_MS
                 new_bars=[b for b in bars if b.timestamp>cursor]
                 for bar in new_bars:
                     was_open=symbol in self.account.positions and not self.account.positions[symbol].closed
