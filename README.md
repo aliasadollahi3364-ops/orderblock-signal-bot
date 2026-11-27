@@ -58,3 +58,11 @@ An independent Telegram module samples Talasanj prices for 18k gold, the free-ma
 Set `TALASANJ_API_KEY` privately in the hosting environment. Optional settings: `GOLD_POLL_SECONDS` (default 20) and `GOLD_DAILY_REPORT_HOUR` (default 10, Tehran time). The free Talasanj API key can be created through `@taalasanj_bot`; attribution is included in reports.
 
 The existing strategy's 4H SMA200 filter is not disabled. Talasanj's intraday history is limited, so the gold strategy must first collect 200 closed 4H candles locally (roughly 34 days of continuous data) before it can issue confirmed strategy alerts. Daily valuation reports can start as soon as live prices arrive.
+
+## Independent liquidity-sweep strategy
+
+The supplied `مناطق ورود نقدینگی` Pine v6 indicator is implemented as a separate scanner in `app/liquidity.py`. It evaluates **15-minute candles only** and reads only the user's manually selected WEEX symbols. Its defaults mirror the indicator: EMA 50 filter enabled, session filter disabled, 5-bar pivots, 20 stored liquidity levels, a 2-bar confirmation window, 10-bar signal cooldown, ATR 14, stop at 1.5 ATR and one take-profit at 3R. The optional session filter uses Tokyo, London and New York local time zones with daylight-saving changes.
+
+This scanner has its own SQLite namespace and demo ledger; it does not write to the original OB/trendline account tables. Its demo starts at 100 USDT and reserves 5 USDT margin per position at 5x leverage (25 USDT notional). Each position has one stop and one take-profit, with stop priority if both levels are touched in the same candle. No exchange order endpoint is used.
+
+Telegram controls: `/liquidity`, `/liquidity on|off`, `/liquidity ema on|off`, and `/liquidity session on|off`.
