@@ -15,6 +15,7 @@ from app.config import Settings
 from app.demo import DemoAccount
 from app.gold_market import GoldMarketService, format_gold_signal
 from app.market_data import WeexMarketData
+from app.liquidity import LiquidityScanner, LiquidityStore
 from app.scanner import AutomaticScanner, open_demo_from_signal
 from app.runtime import runtime
 from app.storage import SQLiteStore
@@ -356,6 +357,85 @@ async def run_crypto_scanner(settings: Settings) -> None:
             await bot.shutdown()
 
 
+async def run_liquidity_scanner(settings: Settings) -> None:
+    """Independent 15m liquidity-sweep scanner with its own fixed-margin demo ledger."""
+    market_data = WeexMarketData(settings.exchange_id, settings.quote_currency)
+    store = LiquidityStore(settings.database_path)
+    account, config, enabled, cursors = store.load()
+    runtime.liquidity_account = account
+    runtime.liquidity_config = config
+    runtime.liquidity_enabled = enabled
+    runtime.liquidity_store = store
+    runtime.liquidity_cursors = cursors
+    loop = asyncio.get_running_loop()
+    bot = Bot(token=settings.telegram_bot_token) if settings.telegram_bot_token and settings.telegram_chat_id else None
+    if bot is not None:
+        try:
+            await bot.initialize()
+        except Exception:
+            logger.exception("Liquidity Telegram notifications unavailable; scanning continues.")
+            bot = None
+
+    def notify(message: str) -> None:
+        if bot is None:
+            return
+        future = asyncio.run_coroutine_threadsafe(
+            bot.send_message(chat_id=settings.telegram_chat_id, text=message), loop
+        )
+        def report_error(done):
+            try:
+                done.result()
+            except Exception:
+                logger.exception("Liquidity Telegram notification failed.")
+        future.add_done_callback(report_error)
+
+    def on_signal(signal, position) -> None:
+        notify(
+            f"💧 سیگنال جمع‌آوری نقدینگی | {signal.symbol}\\n"
+            f"جهت: {signal.side} | تایم‌فریم: ۱۵ دقیقه\\n"
+            f"ورود: {signal.entry:.8g}\\n"
+            f"حد ضرر: {signal.stop:.8g}\\n"
+            f"حد سود: {signal.target:.8g} ({signal.risk_reward:g}R)\\n"
+            f"EMA: {signal.ema:.8g} | ATR: {signal.atr:.8g}\\n"
+            f"امتیاز کیفیت: {signal.score:.1f}/100\\n"
+            + ("ثبت در حساب دمو مستقل انجام شد.\\n" if position is not None else
+               "سیگنال صادر شد؛ ثبت دمو به دلیل محدودیت مارجین انجام نشد.\\n")
+            + "مارجین ثابت: ۵ USDT | اهرم: ۵x | ارزش اسمی: ۲۵ USDT\\n"
+            + "فقط دمو؛ معامله واقعی خاموش."
+        )
+
+    def on_trade_event(event: dict) -> None:
+        label = "حد سود فعال شد" if event.get("type") == "TP" else "حد ضرر فعال شد"
+        notify(
+            f"💧 نتیجه معامله جمع‌آوری نقدینگی | {event.get('symbol', '')}\\n"
+            f"{label} | قیمت خروج: {event.get('price', 0):.8g}\\n"
+            f"سود/زیان خالص: {event.get('realized_pnl', 0):+.4f} USDT\\n"
+            "حساب دمو مستقل؛ معاملات واقعی خاموش."
+        )
+
+    scanner = LiquidityScanner(
+        market_data=market_data, account=account, config=config, store=store,
+        enabled=enabled, cursors=cursors, on_signal=on_signal,
+        on_trade_event=on_trade_event,
+    )
+    runtime.liquidity_scanner = scanner
+    logger.info("Liquidity sweep scanner started; 15m only; manual WEEX symbols; separate demo account.")
+    try:
+        while True:
+            scanner.config = runtime.liquidity_config or scanner.config
+            scanner.enabled = runtime.liquidity_enabled
+            runtime.liquidity_scanner_state = "RUNNING" if scanner.enabled else "PAUSED"
+            summary = await asyncio.to_thread(scanner.scan_once, list(runtime.manual_symbols))
+            runtime.liquidity_cursors = scanner.cursors
+            logger.info("Liquidity scan completed: %s", summary)
+            await asyncio.sleep(settings.scan_interval_seconds)
+    finally:
+        runtime.liquidity_scanner_state = "STOPPED"
+        market_data.close()
+        if bot is not None:
+            await bot.shutdown()
+
+
 async def main() -> None:
     settings = Settings()
     settings.assert_demo_only()
@@ -380,6 +460,7 @@ async def main() -> None:
         run_telegram(settings.telegram_bot_token, settings.telegram_chat_id),
         run_gold_scanner(settings),
         run_crypto_scanner(settings),
+        run_liquidity_scanner(settings),
     )
 
 
