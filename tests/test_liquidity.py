@@ -91,6 +91,30 @@ def test_disabled_liquidity_scanner_does_not_fetch(tmp_path):
     assert scanner.scan_once(["BTC"]) == {"symbols": 0, "signals": 0, "events": 0, "errors": 0}
 
 
+def test_strategy_rejects_sweep_below_minimum_quality_score():
+    cfg = LiquidityConfig(
+        ema_length=3, use_ema_filter=False, pivot_length=2, atr_length=2,
+        min_quality_score=100,
+    )
+    engine = LiquiditySweepStrategy("BTC/USDT", cfg)
+    bars = [
+        Candle(0 * BAR_MS, 100, 102, 99, 101, 10),
+        Candle(1 * BAR_MS, 101, 102, 98, 100, 10),
+        Candle(2 * BAR_MS, 100, 101, 95, 99, 10),
+        Candle(3 * BAR_MS, 99, 102, 98, 101, 10),
+        Candle(4 * BAR_MS, 101, 103, 99, 102, 10),
+        Candle(5 * BAR_MS, 97, 100, 94, 99, 10),
+    ]
+    signals = [engine.on_bar(bar) for bar in bars]
+    assert signals[-1] is None
+    assert engine.pending_bull is None
+
+
+def test_liquidity_config_rejects_quality_score_out_of_range():
+    with pytest.raises(ValueError, match="quality score"):
+        LiquidityConfig(min_quality_score=100.1)
+
+
 def test_strategy_detects_confirmed_pivot_low_sweep():
     cfg = LiquidityConfig(ema_length=3, use_ema_filter=False, pivot_length=2, atr_length=2)
     engine = LiquiditySweepStrategy("BTC/USDT", cfg)
