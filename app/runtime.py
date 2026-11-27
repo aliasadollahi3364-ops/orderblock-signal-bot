@@ -66,5 +66,14 @@ class BotRuntime:
         else:
             self.storage.save_pending_setups(self.pending_limits)
 
+    # Independent liquidity-sweep strategy runtime; isolated from the OB ledger.
+    liquidity_account: Any = None
+    liquidity_config: Any = None
+    liquidity_enabled: bool = True
+    liquidity_store: Any = None
+    liquidity_cursors: dict[str, int] = field(default_factory=dict)
+    liquidity_scanner_state: str = "STARTING"
+    liquidity_scanner: Any = None
+
 
 runtime = BotRuntime()
