@@ -119,10 +119,10 @@ class LiquiditySweepStrategy:
             return
         window = self.bars[center - n:center + n + 1]
         highs, lows = [b.high for b in window], [b.low for b in window]
-        if highs.count(max(highs)) == 1 and self.bars[center].high == max(highs):
+        if self.bars[center].high == max(highs):
             self.high_levels.append((self.bars[center].high, center))
             self.high_levels = self.high_levels[-self.config.stored_levels:]
-        if lows.count(min(lows)) == 1 and self.bars[center].low == min(lows):
+        if self.bars[center].low == min(lows):
             self.low_levels.append((self.bars[center].low, center))
             self.low_levels = self.low_levels[-self.config.stored_levels:]
 
