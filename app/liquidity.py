@@ -245,10 +245,10 @@ class LiquidityDemoAccount:
     def open_position(self, signal: LiquiditySignal):
         old = self.positions.get(signal.symbol)
         if old is not None and not old.closed: raise ValueError("Position already open for this symbol")
-        if old is not None: self.history.append(old)
         if self.free_margin + 1e-9 < self.margin_per_trade: raise ValueError("Insufficient free liquidity demo margin")
         if signal.side == "BUY" and not signal.stop < signal.entry < signal.target: raise ValueError("Invalid BUY levels")
         if signal.side == "SELL" and not signal.target < signal.entry < signal.stop: raise ValueError("Invalid SELL levels")
+        if old is not None: self.history.append(old)
         qty = self.notional / signal.entry
         fee = self.notional * self.fee_rate
         self.balance = float(self.balance or 0) - fee
