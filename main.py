@@ -391,25 +391,25 @@ async def run_liquidity_scanner(settings: Settings) -> None:
 
     def on_signal(signal, position) -> None:
         notify(
-            f"💧 سیگنال جمع‌آوری نقدینگی | {signal.symbol}\\n"
-            f"جهت: {signal.side} | تایم‌فریم: ۱۵ دقیقه\\n"
-            f"ورود: {signal.entry:.8g}\\n"
-            f"حد ضرر: {signal.stop:.8g}\\n"
-            f"حد سود: {signal.target:.8g} ({signal.risk_reward:g}R)\\n"
-            f"EMA: {signal.ema:.8g} | ATR: {signal.atr:.8g}\\n"
-            f"امتیاز کیفیت: {signal.score:.1f}/100\\n"
-            + ("ثبت در حساب دمو مستقل انجام شد.\\n" if position is not None else
-               "سیگنال صادر شد؛ ثبت دمو به دلیل محدودیت مارجین انجام نشد.\\n")
-            + "مارجین ثابت: ۵ USDT | اهرم: ۵x | ارزش اسمی: ۲۵ USDT\\n"
+            f"💧 سیگنال جمع‌آوری نقدینگی | {signal.symbol}\n"
+            f"جهت: {signal.side} | تایم‌فریم: ۱۵ دقیقه\n"
+            f"ورود: {signal.entry:.8g}\n"
+            f"حد ضرر: {signal.stop:.8g}\n"
+            f"حد سود: {signal.target:.8g} ({signal.risk_reward:g}R)\n"
+            f"EMA: {signal.ema:.8g} | ATR: {signal.atr:.8g}\n"
+            f"امتیاز کیفیت: {signal.score:.1f}/100\n"
+            + ("ثبت در حساب دمو مستقل انجام شد.\n" if position is not None else
+               "سیگنال صادر شد؛ ثبت دمو به دلیل محدودیت مارجین انجام نشد.\n")
+            + "مارجین ثابت: ۵ USDT | اهرم: ۵x | ارزش اسمی: ۲۵ USDT\n"
             + "فقط دمو؛ معامله واقعی خاموش."
         )
 
     def on_trade_event(event: dict) -> None:
         label = "حد سود فعال شد" if event.get("type") == "TP" else "حد ضرر فعال شد"
         notify(
-            f"💧 نتیجه معامله جمع‌آوری نقدینگی | {event.get('symbol', '')}\\n"
-            f"{label} | قیمت خروج: {event.get('price', 0):.8g}\\n"
-            f"سود/زیان خالص: {event.get('realized_pnl', 0):+.4f} USDT\\n"
+            f"💧 نتیجه معامله جمع‌آوری نقدینگی | {event.get('symbol', '')}\n"
+            f"{label} | قیمت خروج: {event.get('price', 0):.8g}\n"
+            f"سود/زیان خالص: {event.get('realized_pnl', 0):+.4f} USDT\n"
             "حساب دمو مستقل؛ معاملات واقعی خاموش."
         )
 
