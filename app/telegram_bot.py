@@ -9,6 +9,7 @@ from telegram import ReplyKeyboardMarkup, Update
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 from app.runtime import runtime
+from app.liquidity import LiquidityConfig
 from app.strategy_pine_v6 import StrategyConfig
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,7 @@ MAIN_MENU = ReplyKeyboardMarkup(
         ["/open", "/stats"],
         ["/history", "/panel"],
         ["/symbols", "/add", "/remove"],
+        ["/liquidity"],
         ["⚙️ تنظیمات کلی استراتژی"],
         ["🥇 همه اطلاعات طلا"],
         ["/help", "/menu"],
@@ -107,6 +109,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "تحلیل طلا: " + ("فعال" if runtime.gold_market is not None else "در انتظار کلید API") + "\n"
             "حساب دمو: فعال\n"
             f"اسکن WEEX: {runtime.scanner_state} | نمادهای دستی: {len(runtime.manual_symbols)}\n"
+            f"اسکن جمع‌آوری نقدینگی: {runtime.liquidity_scanner_state} | تایم‌فریم: ۱۵ دقیقه\n"
             "معاملات واقعی: خاموش",
         )
 
@@ -233,6 +236,81 @@ async def remove_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await _reply_temporary(update, context, "این نماد در فهرست دستی نبود.")
     else:
         await _reply_temporary(update, context, "نماد از فهرست اسکن حذف شد. سابقه و معاملات دمو پاک نشدند.")
+
+
+def _liquidity_status_text() -> str:
+    account = runtime.liquidity_account
+    config = runtime.liquidity_config or LiquidityConfig()
+    state = "فعال" if runtime.liquidity_enabled else "خاموش"
+    if account is None:
+        return (
+            "💧 استراتژی جمع‌آوری نقدینگی\\n"
+            f"وضعیت اسکنر: {state} | تایم‌فریم: ۱۵ دقیقه\\n"
+            "حساب دمو در حال آماده‌سازی است."
+        )
+    lines = [
+        "💧 استراتژی جمع‌آوری نقدینگی",
+        f"وضعیت اسکنر: {state} | تایم‌فریم: ۱۵ دقیقه",
+        f"EMA {config.ema_length}: {'فیلتر روشن' if config.use_ema_filter else 'فیلتر خاموش'}",
+        f"فیلتر سشن: {'روشن' if config.use_session_filter else 'خاموش'}",
+        "",
+        "💰 حساب دمو مستقل",
+        f"موجودی اولیه: {account.initial_balance:.2f} USDT",
+        f"موجودی فعلی: {float(account.balance or 0):.2f} USDT",
+        f"سود/زیان تحقق‌یافته: {account.realized_pnl:+.4f} USDT",
+        "مارجین هر معامله: 5 USDT | اهرم: 5x | ارزش اسمی: 25 USDT",
+        f"مارجین مصرف‌شده: {account.margin_used:.2f} USDT",
+        f"مارجین آزاد: {account.free_margin:.2f} USDT",
+        f"معاملات باز: {len(account.open_positions)}",
+    ]
+    for position in account.open_positions:
+        lines.append(
+            f"{position.symbol} | {position.side} | ورود: {position.entry:g} | "
+            f"SL: {position.stop:g} | TP: {position.target:g}"
+        )
+    lines += [
+        "",
+        "دستورات:",
+        "/liquidity on یا /liquidity off",
+        "/liquidity ema on یا /liquidity ema off",
+        "/liquidity session on یا /liquidity session off",
+        "فقط تایم‌فریم ۱۵ دقیقه؛ معاملات واقعی خاموش.",
+    ]
+    return "\\n".join(lines)
+
+
+async def liquidity_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    args = [arg.strip().lower() for arg in context.args]
+    config = runtime.liquidity_config or LiquidityConfig()
+    try:
+        if not args:
+            await _reply_temporary(update, context, _liquidity_status_text())
+            return
+        if len(args) == 1 and args[0] in {"on", "off", "روشن", "خاموش"}:
+            runtime.liquidity_enabled = args[0] in {"on", "روشن"}
+            message = "اسکنر جمع‌آوری نقدینگی " + ("روشن شد." if runtime.liquidity_enabled else "خاموش شد.")
+        elif len(args) == 2 and args[0] in {"ema", "session"} and args[1] in {"on", "off", "روشن", "خاموش"}:
+            value = args[1] in {"on", "روشن"}
+            if args[0] == "ema":
+                config = replace(config, use_ema_filter=value)
+                label = "فیلتر EMA"
+            else:
+                config = replace(config, use_session_filter=value)
+                label = "فیلتر سشن"
+            runtime.liquidity_config = config
+            message = f"{label} " + ("روشن شد." if value else "خاموش شد.")
+        else:
+            raise ValueError("نمونه: /liquidity on یا /liquidity ema off یا /liquidity session on")
+        if runtime.liquidity_store is not None and runtime.liquidity_account is not None:
+            runtime.liquidity_store.save(
+                runtime.liquidity_account, runtime.liquidity_config or config,
+                runtime.liquidity_enabled, runtime.liquidity_cursors,
+            )
+        await _reply_temporary(update, context, "✅ " + message + "\\n\\n" + _liquidity_status_text())
+    except (TypeError, ValueError) as exc:
+        await _reply_temporary(update, context, f"تنظیم انجام نشد: {exc}")
 
 
 STRATEGY_BOOL_SETTINGS = {
@@ -376,7 +454,7 @@ def build_telegram_application(token: str, allowed_chat_id: str) -> Application:
         ("demo", demo), ("open", open_positions), ("panel", demo_panel),
         ("history", trade_history), ("stats", stats), ("help", help_command),
         ("add", add_symbol), ("remove", remove_symbol), ("symbols", list_symbols),
-        ("strategy", strategy_settings),
+        ("strategy", strategy_settings), ("liquidity", liquidity_settings),
     ):
         application.add_handler(CommandHandler(command, callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_router))
