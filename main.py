@@ -360,13 +360,18 @@ async def run_crypto_scanner(settings: Settings) -> None:
 async def run_liquidity_scanner(settings: Settings) -> None:
     """Independent 15m liquidity-sweep scanner with its own fixed-margin demo ledger."""
     market_data = WeexMarketData(settings.exchange_id, settings.quote_currency)
-    store = LiquidityStore(settings.database_path)
-    account, config, enabled, cursors = store.load()
-    runtime.liquidity_account = account
-    runtime.liquidity_config = config
-    runtime.liquidity_enabled = enabled
+    store = runtime.liquidity_store or LiquidityStore(settings.database_path)
+    if runtime.liquidity_account is None:
+        account, config, enabled, cursors = store.load()
+        runtime.liquidity_account = account
+        runtime.liquidity_config = config
+        runtime.liquidity_enabled = enabled
+        runtime.liquidity_cursors = cursors
+    account = runtime.liquidity_account
+    config = runtime.liquidity_config
+    enabled = runtime.liquidity_enabled
+    cursors = runtime.liquidity_cursors
     runtime.liquidity_store = store
-    runtime.liquidity_cursors = cursors
     loop = asyncio.get_running_loop()
     bot = Bot(token=settings.telegram_bot_token) if settings.telegram_bot_token and settings.telegram_chat_id else None
     if bot is not None:
@@ -446,6 +451,11 @@ async def main() -> None:
         leverage=settings.demo_leverage,
     ))
     runtime.storage = store
+    # Load the independent liquidity demo before Telegram starts polling.
+    liquidity_store = LiquidityStore(settings.database_path)
+    (runtime.liquidity_account, runtime.liquidity_config,
+     runtime.liquidity_enabled, runtime.liquidity_cursors) = liquidity_store.load()
+    runtime.liquidity_store = liquidity_store
     runtime.pending_limits = store.load_pending_setups()
     # Keep the user's manually selected symbols and the existing demo ledger.
     runtime.manual_symbols = store.load_manual_symbols()
