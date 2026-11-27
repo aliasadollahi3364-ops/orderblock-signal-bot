@@ -23,6 +23,7 @@ class LiquidityConfig:
     min_wick_percent: float = 0.35
     max_body_percent: float = 0.65
     min_candle_range_atr: float = 0.20
+    min_quality_score: float = 70.0
     require_bullish_body: bool = True
     require_bearish_body: bool = True
     confirmation_window: int = 2
@@ -40,6 +41,8 @@ class LiquidityConfig:
             raise ValueError("Invalid liquidity storage or confirmation window")
         if self.signal_cooldown_bars < 0 or self.min_sweep_distance_atr < 0:
             raise ValueError("Invalid cooldown or sweep distance")
+        if not 0 <= self.min_quality_score <= 100:
+            raise ValueError("Minimum quality score must be between 0 and 100")
         if self.take_profit_rr not in {1.5, 2.0, 3.0, 4.0, 5.0, 6.0} or self.stop_loss_atr_multiplier <= 0:
             raise ValueError("Invalid ATR stop or take-profit RR")
 
@@ -162,11 +165,13 @@ class LiquiditySweepStrategy:
         bull_mid_now = not c.require_midline_break or bar.close > mid
         bear_mid_now = not c.require_midline_break or bar.close < mid
         if valid_buy:
-            self.pending_bull = _Pending(i, bar.high, bar.low, mid, low_hit[0],
-                self._score(lower_pct, body_pct, range_atr, bull_ema, bull_reclaim, bull_mid_now))
+            sweep_score = self._score(lower_pct, body_pct, range_atr, bull_ema, bull_reclaim, bull_mid_now)
+            if sweep_score >= c.min_quality_score:
+                self.pending_bull = _Pending(i, bar.high, bar.low, mid, low_hit[0], sweep_score)
         if valid_sell:
-            self.pending_bear = _Pending(i, bar.high, bar.low, mid, high_hit[0],
-                self._score(upper_pct, body_pct, range_atr, bear_ema, bear_reclaim, bear_mid_now))
+            sweep_score = self._score(upper_pct, body_pct, range_atr, bear_ema, bear_reclaim, bear_mid_now)
+            if sweep_score >= c.min_quality_score:
+                self.pending_bear = _Pending(i, bar.high, bar.low, mid, high_hit[0], sweep_score)
         bull_open = self.pending_bull is not None and i - self.pending_bull.index <= c.confirmation_window
         bear_open = self.pending_bear is not None and i - self.pending_bear.index <= c.confirmation_window
         long_ok = not c.use_ema_filter or bar.close > ema
